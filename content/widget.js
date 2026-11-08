@@ -3,8 +3,6 @@ window.yga = window.yga || {};
 (function (yga) {
   "use strict";
 
-  const i18n = (key) => chrome.i18n.getMessage(key) || key;
-
   const GEAR_SVG =
     '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">' +
     '<circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/>' +
@@ -30,18 +28,18 @@ window.yga = window.yga || {};
 
     const select = el("select", "yga-profile-select", {
       disabled: true,
-      "aria-label": i18n("profilesPlaceholder")
+      "aria-label": yga.i18n("profilesPlaceholder")
     });
     const placeholder = el("option", null, { value: "" });
-    placeholder.textContent = i18n("profilesPlaceholder");
+    placeholder.textContent = yga.i18n("profilesPlaceholder");
     placeholder.disabled = true;
     placeholder.selected = true;
     select.appendChild(placeholder);
 
     const gear = el("button", "yga-config-btn", {
       type: "button",
-      "aria-label": i18n("configButton"),
-      title: i18n("configButton")
+      "aria-label": yga.i18n("configButton"),
+      title: yga.i18n("configButton")
     });
     gear.innerHTML = GEAR_SVG; // static markup, no YouTube data (PLAN.md §12)
 
@@ -54,6 +52,72 @@ window.yga = window.yga || {};
     widget.appendChild(list);
     return widget;
   }
+
+  // --- subscription rows (stage 1) ---
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const img = entry.target;
+      observer.unobserve(img);
+      if (img.dataset.src) {
+        img.src = img.dataset.src;
+        delete img.dataset.src;
+      }
+    }
+  }, { rootMargin: "200px" });
+
+  function rowNode(sub) {
+    const row = el("a", "yga-row", {
+      href: "/channel/" + sub.channelId + "/videos",
+      title: sub.title
+    });
+
+    const avatar = el("img", "yga-avatar", { alt: "" });
+    if (sub.avatarUrl) {
+      avatar.dataset.src = sub.avatarUrl;
+      observer.observe(avatar);
+    } else {
+      avatar.classList.add("yga-avatar-empty");
+    }
+
+    const title = el("span", "yga-title");
+    title.textContent = sub.title;
+
+    row.appendChild(avatar);
+    row.appendChild(title);
+    return row;
+  }
+
+  function placeholderRow(textKey) {
+    const row = el("div", "yga-placeholder");
+    row.textContent = yga.i18n(textKey);
+    return row;
+  }
+
+  yga.widget = {
+    render(list) {
+      const widget = document.querySelector('[data-yga="widget"]');
+      if (!widget) return;
+      const host = widget.querySelector(".yga-list");
+      host.textContent = "";
+
+      if (!list) {
+        host.appendChild(placeholderRow("loadingSubs"));
+        return;
+      }
+      if (!list.length) {
+        host.appendChild(placeholderRow("emptyState"));
+        return;
+      }
+      const sorted = list.slice().sort((a, b) =>
+        a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
+      );
+      const frag = document.createDocumentFragment();
+      for (const sub of sorted) frag.appendChild(rowNode(sub));
+      host.appendChild(frag);
+    }
+  };
 
   // Idempotent mount (PLAN.md §8.2, §8.3): reuses a live node, rehangs a detached one.
   yga.mountWidget = function mountWidget() {
@@ -72,6 +136,8 @@ window.yga = window.yga || {};
     } else {
       sections.appendChild(widget);
     }
+
+    if (yga.state) yga.widget.render(yga.state.getSubs());
     return widget;
   };
 })(window.yga);

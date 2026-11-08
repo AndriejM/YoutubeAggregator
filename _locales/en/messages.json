@@ -18,5 +18,13 @@
   "configButton": {
     "message": "Configuration",
     "description": "Aria label for the gear button"
+  },
+  "loadingSubs": {
+    "message": "Loading subscriptions…",
+    "description": "Placeholder row while subscriptions load"
+  },
+  "emptyState": {
+    "message": "No subscriptions found",
+    "description": "Placeholder row when the channel list is empty"
   }
 }

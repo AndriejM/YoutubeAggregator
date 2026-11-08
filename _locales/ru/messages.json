@@ -18,5 +18,13 @@
   "configButton": {
     "message": "Конфигурация",
     "description": "Aria-метка кнопки шестерёнки"
+  },
+  "loadingSubs": {
+    "message": "Загрузка подписок…",
+    "description": "Заглушка при загрузке подписок"
+  },
+  "emptyState": {
+    "message": "Подписки не найдены",
+    "description": "Заглушка пустого списка каналов"
   }
 }

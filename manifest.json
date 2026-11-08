@@ -17,6 +17,10 @@
       "matches": ["https://*.youtube.com/*"],
       "js": [
         "content/selectors.js",
+        "content/i18n.js",
+        "content/bridge-client.js",
+        "content/state.js",
+        "content/api-client.js",
         "content/widget.js",
         "content/bootstrap.js"
       ],

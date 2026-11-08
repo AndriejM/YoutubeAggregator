@@ -74,6 +74,56 @@
   scrollbar-width: thin;
 }
 
+.yga-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 16px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 8px;
+}
+
+.yga-row:hover {
+  background: var(--yga-hover);
+}
+
+.yga-row:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-avatar {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--yga-hover);
+  object-fit: cover;
+}
+
+.yga-avatar:not([src]) {
+  visibility: hidden;
+}
+
+.yga-avatar-empty {
+  visibility: visible;
+}
+
+.yga-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yga-placeholder {
+  padding: 8px 16px;
+  color: var(--yga-fg-dim);
+  font-size: 13px;
+}
+
 /* YT-override: keep the widget from widening the guide drawer */
 #guide-inner-content .yga-widget {
   box-sizing: border-box;
