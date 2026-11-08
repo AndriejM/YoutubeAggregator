@@ -42,13 +42,26 @@ window.yga = window.yga || {};
     // Refresh the cached catalog; returns the catalog list.
     async refreshSubscriptions() {
       let list = [];
+      let guideCount = -1; // -1 = guide path failed
       try {
         list = await fromGuide();
+        guideCount = list.length;
       } catch (e) {
-        console.debug("[yga] guide unavailable:", e);
+        console.warn("[yga] guide unavailable:", e);
+      }
+      let browseCount = -1; // -1 = not attempted
+      if (!list.length) {
+        try {
+          list = await fromBrowse();
+          browseCount = list.length;
+        } catch (e) {
+          console.warn("[yga] browse fallback failed:", e);
+        }
       }
       if (!list.length) {
-        list = await fromBrowse();
+        console.warn(`[yga] subscriptions empty: guide=${guideCount}, browse=${browseCount}`);
+      } else {
+        console.info(`[yga] subscriptions: guide=${guideCount}, browse=${browseCount}`);
       }
       await yga.state.loadCache();
       if (!list.length) return yga.state.getSubs(); // keep cache on total failure
