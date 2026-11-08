@@ -15,6 +15,12 @@
   "content_scripts": [
     {
       "matches": ["https://*.youtube.com/*"],
+      "js": ["page/bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://*.youtube.com/*"],
       "js": [
         "content/selectors.js",
         "content/i18n.js",
@@ -30,7 +36,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["page/bridge.js", "icons/*"],
+      "resources": ["icons/*"],
       "matches": ["https://*.youtube.com/*"]
     }
   ],

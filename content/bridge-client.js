@@ -3,20 +3,12 @@ window.yga = window.yga || {};
 (function (yga) {
   "use strict";
 
-  // Injects the main-world bridge once (PLAN.md §7), then wraps commands
-  // in promises keyed by nonce. Responses require matching nonce + window source.
+  // The bridge ships as a "world": "MAIN" content script (manifest) — CSP-safe;
+  // <script src=chrome-extension://...> injection is blocked by YouTube CSP.
+  // The isolated world cannot see the bridge directly; readiness is handled by
+  // the retry in api-client when a first call races the MAIN-world load.
   const pending = new Map();
   let seq = 0;
-  let injected = false;
-
-  function inject() {
-    if (injected) return;
-    injected = true;
-    const s = document.createElement("script");
-    s.src = chrome.runtime.getURL("page/bridge.js");
-    s.onload = () => s.remove();
-    (document.head || document.documentElement).appendChild(s);
-  }
 
   function newNonce() {
     const buf = new Uint32Array(2);
@@ -25,7 +17,6 @@ window.yga = window.yga || {};
   }
 
   function call(cmd, timeoutMs) {
-    inject();
     return new Promise((resolve, reject) => {
       const nonce = newNonce();
       const timer = setTimeout(() => {

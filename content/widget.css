@@ -17,6 +17,13 @@
   contain: layout style;
 }
 
+.yga-widget-title {
+  padding: 6px 16px 2px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--yga-fg);
+}
+
 .yga-header {
   display: flex;
   align-items: center;

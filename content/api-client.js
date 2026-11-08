@@ -20,8 +20,15 @@ window.yga = window.yga || {};
   }
 
   async function fromGuide() {
-    const data = await yga.bridge.call("getGuideSubscriptions");
-    return normalize(data);
+    try {
+      const data = await yga.bridge.call("getGuideSubscriptions", 3000);
+      return normalize(data);
+    } catch (e) {
+      // First call can race the MAIN-world bridge load; retry once.
+      await new Promise((r) => setTimeout(r, 1200));
+      const data = await yga.bridge.call("getGuideSubscriptions");
+      return normalize(data);
+    }
   }
 
   async function fromBrowse() {

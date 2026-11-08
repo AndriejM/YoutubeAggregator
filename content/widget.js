@@ -50,6 +50,10 @@ window.yga = window.yga || {};
 
     widget.appendChild(header);
     widget.appendChild(list);
+
+    const title = el("div", "yga-widget-title");
+    title.textContent = yga.i18n("widgetTitle");
+    widget.insertBefore(title, header);
     return widget;
   }
 
@@ -131,8 +135,9 @@ window.yga = window.yga || {};
 
     const widget = buildWidget();
     const link = yga.selectors.find("subscriptionsLink");
-    if (link && link.parentNode === sections) {
-      link.insertAdjacentElement("afterend", widget);
+    if (link) {
+      const host = link.closest("yt-section") || link.parentNode;
+      host.insertAdjacentElement("afterend", widget);
     } else {
       sections.appendChild(widget);
     }

@@ -8,8 +8,13 @@ window.yga = window.yga || {};
   const SELECTORS = {
     app: ["ytd-app"],
     drawer: ["tp-yt-app-drawer", "ytd-guide-entry-renderer"],
-    guideRoot: ["#guide-inner-content", "ytd-guide-renderer #sections"],
-    guideSections: ["#guide-inner-content #sections", "ytd-guide-renderer #sections"],
+    guideRoot: ["#guide-inner-content", "ytd-guide-renderer", "#guide"],
+    guideSections: [
+      "#guide-inner-content #sections",
+      "ytd-guide-renderer #sections",
+      "#guide-inner-content",
+      "ytd-guide-renderer"
+    ],
     subscriptionsLink: [
       "#guide-inner-content a#subscriptions-link",
       '#guide-inner-content a[href="/feed/subscriptions"]',
