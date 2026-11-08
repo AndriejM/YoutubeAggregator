@@ -32,6 +32,12 @@ window.yga = window.yga || {};
   }
 
   async function fromBrowse() {
+    try {
+      const data = await yga.bridge.call("browseSubscriptions", 10000);
+      return normalize(data);
+    } catch (e) {
+      console.debug("[yga] page browse failed, trying service worker:", e);
+    }
     const context = await yga.bridge.call("getContext").catch(() => null);
     const resp = await chrome.runtime.sendMessage({ type: "subs:browse", context: context });
     if (!resp || !resp.ok) throw new Error((resp && resp.error) || "browse failed");

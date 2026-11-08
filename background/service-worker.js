@@ -18,7 +18,9 @@ const BROWSE_BODY = {
 async function browseSubscriptions(pageContext) {
   const body = Object.assign({}, BROWSE_BODY);
   if (pageContext && pageContext.context) {
-    body.context = pageContext.context;
+    // Bridge already returns the unwrapped context; tolerate the wrapped form too.
+    const ctx = pageContext.context;
+    body.context = ctx.context ? ctx.context : ctx;
   } else {
     body.context = {
       client: {
