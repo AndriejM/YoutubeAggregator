@@ -32,16 +32,17 @@ window.yga = window.yga || {};
   }
 
   async function fromBrowse() {
-    try {
-      const data = await yga.bridge.call("browseSubscriptions", 10000);
-      return normalize(data);
-    } catch (e) {
-      console.debug("[yga] page browse failed, trying service worker:", e);
+    // Page-world sources only: youtubei needs the page's SAPISIDHASH auth,
+    // a service-worker fetch is 403 and a logged-out /feed/channels is empty.
+    for (const cmd of ["browseSubscriptions", "getSubscriptionsPage"]) {
+      try {
+        const list = normalize(await yga.bridge.call(cmd, 12000));
+        if (list.length) return list;
+      } catch (e) {
+        console.debug("[yga] " + cmd + " failed:", e);
+      }
     }
-    const context = await yga.bridge.call("getContext").catch(() => null);
-    const resp = await chrome.runtime.sendMessage({ type: "subs:browse", context: context });
-    if (!resp || !resp.ok) throw new Error((resp && resp.error) || "browse failed");
-    return normalize(resp.subs);
+    return [];
   }
 
   yga.api = {

@@ -58,6 +58,10 @@
       if (be && typeof be.browseId === "string" && be.browseId.indexOf("UC") === 0) {
         return be.browseId;
       }
+      const cvo = obj.collectionViewModel;
+      if (cvo && typeof cvo.collectionId === "string" && cvo.collectionId.indexOf("UC") === 0) {
+        return cvo.collectionId;
+      }
       const direct = obj.channelId || obj.externalId || obj.contentId || obj.browseId;
       if (typeof direct === "string" && direct.indexOf("UC") === 0) return direct;
       return null;
@@ -68,7 +72,16 @@
       walk(root, (obj) => {
         const id = pickId(obj);
         if (!id || found.has(id)) return;
-        const title = titleOf(obj);
+        let title = titleOf(obj);
+        if (!title) {
+          // collectionViewModel: title/avatar live in child view models.
+          walk(obj, (inner) => {
+            if (title) return;
+            const lm = inner.lockupMetadataViewModel;
+            if (lm) title = lm.title && lm.title.content || lm.title && titleOf(lm.title) || "";
+            if (!title) title = titleOf(inner);
+          }, 0);
+        }
         if (!title) return;
         found.set(id, { channelId: id, title: title, avatarUrl: avatarOf(obj) });
       }, 0);
@@ -97,44 +110,64 @@
   function cmdGetContext() {
     const cfg = window.ytcfg && ytcfg.data_;
     if (!cfg) return null;
-    const context = cfg.INNERTUBE_CONTEXT || null;
+    const raw = cfg.INNERTUBE_CONTEXT || null;
+    const context = raw && raw.context ? raw.context : raw;
+    const client = (context && context.client) || {};
     return {
-      hl: context && context.context && context.context.client && context.context.client.hl || cfg.HL || "en",
-      gl: context && context.context && context.context.client && context.context.client.gl || cfg.GL || "US",
+      hl: client.hl || cfg.HL || "en",
+      gl: client.gl || cfg.GL || "US",
       apiKey: cfg.INNERTUBE_API_KEY || "",
       context: context,
-      visitorData: cfg.VISITOR_DATA || ""
+      visitorData: client.visitorData || cfg.VISITOR_DATA || ""
     };
   }
 
-    function unwrapContext() {
-      const raw = window.ytcfg && ytcfg.get && ytcfg.get("INNERTUBE_CONTEXT");
-      if (!raw) return null;
-      return raw.context ? raw.context : raw;
+  // Full subscriptions page (PLAN.md §6 fallback2): plain HTML with
+    // ytInitialData — works with the page session, unlike youtubei/browse,
+    // which requires the page-only SAPISIDHASH authorization header.
+    function fetchChannelsPage(path) {
+      return fetch(path, { credentials: "same-origin" }).then((res) => {
+        if (!res.ok) throw new Error(path + " HTTP " + res.status);
+        return res.text();
+      }).then((html) => {
+        const m = html.match(/ytInitialData\s*=\s*(\{.+?\});\s*<\/script>/s) ||
+          html.match(/window\["ytInitialData"\]\s*=\s*(\{.+?\});/s);
+        if (!m) return [];
+        const json = JSON.parse(m[1]);
+        const subs = extractSubs(json);
+        if (!subs.length) {
+          const jm = html.match(/ytInitialJSONLData\s*=\s*(\{.+?\});\s*<\/script>/s);
+          if (jm) subs.push(...extractSubs(JSON.parse(jm[1])));
+        }
+        return subs;
+      });
     }
 
-    // browseSubscriptions runs in the page: same origin, cookies and visitorData
-    // — youtubei rejects SW-origin calls (403). PLAN.md §6, §7.
     function cmdBrowseSubscriptions() {
-      const ctx = unwrapContext();
-      if (!ctx) return Promise.reject(new Error("no INNERTUBE_CONTEXT"));
-      const body = { context: ctx, browseId: "FEED_SUBSCRIPTIONS" };
-      return fetch("/youtubei/v1/browse?prettyPrint=false", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body)
-      }).then((res) => {
-        if (!res.ok) throw new Error("browse HTTP " + res.status);
-        return res.json();
-      }).then((json) => extractSubs(json));
+      return fetchChannelsPage("/feed/channels");
+    }
+
+    function cmdGetSubscriptionsPage() {
+      return fetchChannelsPage("/feed/subscriptions");
+    }
+
+    function cmdGetAccountInfo() {
+      const cfg = window.ytcfg && ytcfg.data_;
+      if (!cfg) return null;
+      return {
+        apiKey: cfg.INNERTUBE_API_KEY || "",
+        dataOnEmbedUrl: cfg.DATA_ON_EMBEDDED_UI_URL || "",
+        pageHostname: location.hostname,
+        loggedIn: !!cfg.LOGGED_IN
+      };
     }
 
     const COMMANDS = {
       getGuideSubscriptions: cmdGetGuideSubscriptions,
       getContext: cmdGetContext,
-      browseSubscriptions: cmdBrowseSubscriptions
-      // getAccountInfo() arrives in stage 2 (PLAN.md §7).
+      browseSubscriptions: cmdBrowseSubscriptions,
+      getSubscriptionsPage: cmdGetSubscriptionsPage,
+      getAccountInfo: cmdGetAccountInfo
     };
 
     window.addEventListener("message", (event) => {
