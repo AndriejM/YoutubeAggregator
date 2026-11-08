@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "short_name": "YGA",
+  "version": "0.1.0",
+  "default_locale": "en",
+  "description": "__MSG_extDescription__",
+  "action": { "default_title": "__MSG_extName__" },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "unlimitedStorage", "alarms"],
+  "host_permissions": ["https://*.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://*.youtube.com/*"],
+      "js": [
+        "content/selectors.js",
+        "content/widget.js",
+        "content/bootstrap.js"
+      ],
+      "css": ["content/widget.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page/bridge.js", "icons/*"],
+      "matches": ["https://*.youtube.com/*"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

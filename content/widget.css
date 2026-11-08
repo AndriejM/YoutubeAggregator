@@ -1,0 +1,82 @@
+/* YouTubeAggregator widget (isolated content-script world).
+   Theme follows YouTube via --yt-spec-* custom properties. */
+
+.yga-widget {
+  --yga-fg: var(--yt-spec-text-primary, #0f0f0f);
+  --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
+  --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
+  --yga-border: var(--yt-spec-outline, rgba(0, 0, 0, 0.15));
+  --yga-accent: #c00;
+  --yga-indent: var(--yt-guide-item-indent, 24px);
+
+  display: block;
+  margin: 8px 0 4px;
+  font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
+  font-size: 14px;
+  color: var(--yga-fg);
+  contain: layout style;
+}
+
+.yga-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 16px;
+}
+
+.yga-profile-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  font: inherit;
+  color: var(--yga-fg);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.yga-profile-select:disabled {
+  color: var(--yga-fg-dim);
+  cursor: default;
+}
+
+.yga-config-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.yga-config-btn:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-config-btn:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-list {
+  min-height: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* YT-override: keep the widget from widening the guide drawer */
+#guide-inner-content .yga-widget {
+  box-sizing: border-box;
+  width: 100%;
+  overflow-x: hidden;
+}

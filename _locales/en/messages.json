@@ -1,0 +1,22 @@
+{
+  "extName": {
+    "message": "YouTube Aggregator",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Group your YouTube subscriptions into profiles with new-video counters.",
+    "description": "Extension description"
+  },
+  "widgetTitle": {
+    "message": "Aggregator",
+    "description": "Widget header placeholder text"
+  },
+  "profilesPlaceholder": {
+    "message": "Select profile",
+    "description": "Profile combobox placeholder option"
+  },
+  "configButton": {
+    "message": "Configuration",
+    "description": "Aria label for the gear button"
+  }
+}

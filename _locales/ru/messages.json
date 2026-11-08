@@ -1,0 +1,22 @@
+{
+  "extName": {
+    "message": "YouTube Aggregator",
+    "description": "Название расширения"
+  },
+  "extDescription": {
+    "message": "Группируйте подписки YouTube в профили со счётчиками новых видео.",
+    "description": "Описание расширения"
+  },
+  "widgetTitle": {
+    "message": "Агрегатор",
+    "description": "Заголовок виджета"
+  },
+  "profilesPlaceholder": {
+    "message": "Выберите профиль",
+    "description": "Плейсхолдер комбобокса профилей"
+  },
+  "configButton": {
+    "message": "Конфигурация",
+    "description": "Aria-метка кнопки шестерёнки"
+  }
+}
