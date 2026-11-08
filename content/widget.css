@@ -49,7 +49,9 @@
   cursor: default;
 }
 
-.yga-config-btn {
+.yga-config-btn,
+.yga-profile-rename,
+.yga-profile-del {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -64,14 +66,29 @@
   cursor: pointer;
 }
 
-.yga-config-btn:hover {
+.yga-config-btn:hover,
+.yga-profile-rename:hover,
+.yga-profile-del:hover {
   color: var(--yga-fg);
   background: var(--yga-hover);
 }
 
-.yga-config-btn:focus-visible {
+.yga-config-btn:focus-visible,
+.yga-profile-rename:focus-visible,
+.yga-profile-del:focus-visible {
   outline: 2px solid var(--yga-accent);
   outline-offset: -2px;
+}
+
+/* Builtin profile has no rename/delete (PLAN.md §11 stage 2) */
+.yga-profile-rename:disabled,
+.yga-profile-del:disabled,
+.yga-profile-rename.yga-off,
+.yga-profile-del.yga-off {
+  color: var(--yga-fg-dim);
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
 }
 
 .yga-list {
@@ -129,6 +146,88 @@
   padding: 8px 16px;
   color: var(--yga-fg-dim);
   font-size: 13px;
+}
+
+/* Widget footer: channel membership control for curated profiles (stage 2) */
+.yga-footer {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px 4px 16px;
+}
+
+.yga-picker-toggle {
+  flex: 1 1 auto;
+  height: 26px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--yga-accent);
+  background: transparent;
+  border: 1px dashed var(--yga-border);
+  border-radius: 6px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.yga-picker-toggle:hover {
+  background: var(--yga-hover);
+}
+
+.yga-picker-toggle:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+/* Channel membership picker (§9.2.1): native checkboxes, capped list */
+.yga-picker {
+  margin: 4px 8px 4px 16px;
+  border: 1px solid var(--yga-border);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.yga-picker-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 26px;
+  margin-bottom: 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--yga-fg);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.yga-picker-search:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-picker-rows {
+  max-height: 30vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.yga-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.yga-picker-row:hover {
+  background: var(--yga-hover);
+}
+
+.yga-picker-check {
+  flex: 0 0 auto;
+  accent-color: var(--yga-accent);
+  cursor: pointer;
 }
 
 /* YT-override: keep the widget from widening the guide drawer */

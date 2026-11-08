@@ -21,6 +21,107 @@ window.yga = window.yga || {};
     return node;
   }
 
+  function profileOptions(select, activeId) {
+    lastActiveId = activeId || yga.profiles.BUILTIN_ID;
+    select.textContent = "";
+    for (const p of yga.profiles.list()) {
+      const opt = el("option", null, { value: p.id });
+      opt.textContent = p.name;
+      select.appendChild(opt);
+    }
+    const add = el("option", null, { value: "__add__" });
+    add.textContent = yga.i18n("newProfile");
+    select.appendChild(add);
+    select.value = activeId || yga.profiles.BUILTIN_ID;
+  }
+
+  function setButtonsEnabled(buttons, id) {
+    const profile = id && yga.profiles.get(id);
+    const enabled = !!(profile && !profile.builtin);
+    for (const button of buttons) {
+      button.disabled = !enabled;
+      button.classList.toggle("yga-off", !enabled);
+    }
+  }
+
+  let profileUnsub = null; // one live listener across SPA remounts
+  let lastActiveId = null; // active profile of the mounted widget (empty states)
+
+  function wireProfiles(widget) {
+    const select = widget.querySelector(".yga-profile-select");
+    const rename = widget.querySelector(".yga-profile-rename");
+    const del = widget.querySelector(".yga-profile-del");
+    const editable = [rename, del];
+    if (!yga.profiles) return;
+    if (profileUnsub) profileUnsub();
+
+    let activeId = null;
+    yga.profiles.load().then(() =>
+      yga.profiles.activeProfileId().then((id) => {
+        activeId = id;
+        select.disabled = false;
+        select.removeAttribute("aria-label-placeholder");
+        select.setAttribute("aria-label", yga.i18n("profilesLabel"));
+        profileOptions(select, activeId);
+        setButtonsEnabled(editable, activeId);
+      })
+    );
+
+    select.addEventListener("change", async () => {
+      if (select.value === "__add__") {
+        const name = window.prompt(yga.i18n("newProfilePrompt"));
+        const created = name ? await yga.profiles.create(name) : null;
+        resetPicker(widget);
+        if (created) {
+          activeId = created.id;
+          await yga.profiles.setActiveProfile(created.id);
+          await yga.state.refreshVisible();
+          profileOptions(select, activeId);
+          setButtonsEnabled(editable, activeId);
+          await togglePicker(widget); // a new curated profile starts by picking channels
+          return;
+        }
+        profileOptions(select, activeId);
+        setButtonsEnabled(editable, activeId);
+        await yga.state.refreshVisible();
+        return;
+      }
+      activeId = select.value;
+      resetPicker(widget); // membership editor belongs to one profile only
+      await yga.profiles.setActiveProfile(activeId);
+      setButtonsEnabled(editable, activeId);
+      await yga.state.refreshVisible(); // instant, no YouTube request
+    });
+
+    rename.addEventListener("click", async () => {
+      const profile = yga.profiles.get(activeId);
+      if (!profile || profile.builtin) return;
+      const name = window.prompt(yga.i18n("renameProfilePrompt"), profile.name);
+      if (await yga.profiles.rename(activeId, name)) {
+        profileOptions(select, activeId);
+      } else {
+        select.value = activeId;
+      }
+    });
+
+    del.addEventListener("click", async () => {
+      if (await yga.profiles.remove(activeId)) {
+        resetPicker(widget);
+        activeId = await yga.profiles.activeProfileId();
+        profileOptions(select, activeId);
+        setButtonsEnabled(editable, activeId);
+        await yga.state.refreshVisible();
+      } else {
+        select.value = activeId;
+      }
+    });
+
+    yga.profiles.onProfilesChanged(() => {
+      profileOptions(select, activeId);
+      setButtonsEnabled(editable, activeId);
+    });
+  }
+
   function buildWidget() {
     const widget = el("div", "yga-widget", { "data-yga": "widget" });
 
@@ -43,7 +144,30 @@ window.yga = window.yga || {};
     });
     gear.innerHTML = GEAR_SVG; // static markup, no YouTube data (PLAN.md §12)
 
+    const rename = el("button", "yga-profile-rename", {
+      type: "button",
+      "aria-label": yga.i18n("renameProfile"),
+      title: yga.i18n("renameProfile"),
+      disabled: true
+    });
+    rename.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
+      '<path d="M4 20h4L20 8l-4-4L4 16v4z" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linejoin="round"/></svg>';
+
+    const del = el("button", "yga-profile-del", {
+      type: "button",
+      "aria-label": yga.i18n("deleteProfile"),
+      title: yga.i18n("deleteProfile"),
+      disabled: true
+    });
+    del.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
+      '<path d="M7 7l10 10M17 7L7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
     header.appendChild(select);
+    header.appendChild(rename);
+    header.appendChild(del);
     header.appendChild(gear);
 
     const list = el("div", "yga-list", { "aria-live": "polite" });
@@ -99,8 +223,164 @@ window.yga = window.yga || {};
     return row;
   }
 
+  // "No subscriptions" vs "profile is empty" (§9.2.1 empty states).
+  function emptyKey() {
+    const p = activeProfile();
+    return p && !p.includeAllSubs ? "emptyProfile" : "emptyState";
+  }
+
+  function activeProfile() {
+    return (lastActiveId && yga.profiles && yga.profiles.get(lastActiveId)) || null;
+  }
+
+  // Curated profile = user picks channels; builtin p_1 mirrors all subscriptions.
+  function curated() {
+    const p = activeProfile();
+    return !!(p && !p.includeAllSubs);
+  }
+
+  // --- channel membership picker for curated profiles (§9.2.1, stage 2) ---
+
+  const PICKER_LIMIT = 200; // 995 subs must not freeze the guide drawer
+  const SEARCH_DEBOUNCE_MS = 150;
+  let pickerOpen = false;
+  let pickerFilter = "";
+  let pickerTimer = 0;
+  let pickerData = null; // {subs, comp} while the picker is open
+  let lastList = null;
+
+  function sortRows(list) {
+    return list.slice().sort((a, b) =>
+      (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" })
+    );
+  }
+
+  async function loadPickerData() {
+    const p = activeProfile();
+    const [subs, comp] = await Promise.all([
+      yga.state.getAllSubs(),
+      p ? yga.profiles.getComposition(p.id) : {}
+    ]);
+    pickerData = { subs: subs, comp: comp, profileId: p ? p.id : null };
+    return pickerData;
+  }
+
+  function pickerRow(sub, profileId, isMember) {
+    const row = el("label", "yga-picker-row");
+    const box = el("input", "yga-picker-check", { type: "checkbox" });
+    box.checked = isMember;
+    box.addEventListener("change", async () => {
+      box.disabled = true;
+      if (box.checked) await yga.profiles.addChannel(profileId, sub.channelId);
+      else await yga.profiles.removeChannel(profileId, sub.channelId);
+      if (pickerData) pickerData.comp = await yga.profiles.getComposition(profileId);
+      box.disabled = false;
+      await yga.state.refreshVisible(); // the widget list follows immediately
+    });
+
+    const title = el("span", "yga-title");
+    title.textContent = sub.title;
+    title.title = sub.title;
+
+    row.appendChild(box);
+    row.appendChild(title);
+    return row;
+  }
+
+  function fillPicker(picker) {
+    const host = picker.querySelector(".yga-picker-rows");
+    if (!host || !pickerData) return;
+    host.textContent = "";
+    const needle = pickerFilter.trim().toLowerCase();
+    const all = pickerData.subs;
+    const matched = needle
+      ? all.filter((s) => (s.title || "").toLowerCase().indexOf(needle) >= 0)
+      : all;
+    const shown = sortRows(matched).slice(0, PICKER_LIMIT);
+
+    const frag = document.createDocumentFragment();
+    for (const sub of shown) {
+      const rec = pickerData.comp[sub.channelId];
+      frag.appendChild(pickerRow(sub, pickerData.profileId, !!rec && !rec.unsubscribed && !rec.excluded));
+    }
+    host.appendChild(frag);
+
+    if (matched.length > shown.length) {
+      const hint = el("div", "yga-placeholder");
+      hint.textContent = yga.i18n("pickerMore").replace("{count}", String(matched.length));
+      host.appendChild(hint);
+    } else if (!shown.length) {
+      const hint = el("div", "yga-placeholder");
+      hint.textContent = yga.i18n("pickerEmpty");
+      host.appendChild(hint);
+    }
+  }
+
+  function buildPicker(widget) {
+    const picker = el("div", "yga-picker");
+    const search = el("input", "yga-picker-search", {
+      type: "search",
+      "aria-label": yga.i18n("pickerSearch")
+    });
+    search.placeholder = yga.i18n("pickerSearch");
+    search.value = pickerFilter;
+    search.addEventListener("input", () => {
+      pickerFilter = search.value;
+      if (pickerTimer) clearTimeout(pickerTimer);
+      pickerTimer = setTimeout(() => fillPicker(picker), SEARCH_DEBOUNCE_MS);
+    });
+    picker.appendChild(search);
+    picker.appendChild(el("div", "yga-picker-rows", { "aria-live": "polite" }));
+    widget.insertBefore(picker, widget.querySelector(".yga-list"));
+    return picker;
+  }
+
+  function resetPicker(widget) {
+    pickerOpen = false;
+    pickerData = null;
+    pickerFilter = "";
+    const picker = widget && widget.querySelector(".yga-picker");
+    if (picker) picker.remove();
+  }
+
+  async function togglePicker(widget) {
+    if (pickerOpen) {
+      resetPicker(widget);
+      renderFooter(widget);
+      return;
+    }
+    pickerOpen = true;
+    pickerData = null;
+    const picker = buildPicker(widget);
+    const rows = picker.querySelector(".yga-picker-rows");
+    rows.appendChild(placeholderRow("loadingSubs"));
+    await loadPickerData();
+    if (widget.contains(picker)) fillPicker(picker);
+    renderFooter(widget);
+    const search = picker.querySelector(".yga-picker-search");
+    if (search) search.focus();
+  }
+
+  function renderFooter(widget) {
+    let footer = widget.querySelector(".yga-footer");
+    if (!curated()) {
+      if (footer) footer.remove();
+      return;
+    }
+    if (!footer) {
+      footer = el("div", "yga-footer");
+      widget.appendChild(footer);
+    }
+    footer.textContent = "";
+    const btn = el("button", "yga-picker-toggle", { type: "button" });
+    btn.textContent = yga.i18n(pickerOpen ? "pickerClose" : "addChannels");
+    btn.addEventListener("click", () => togglePicker(widget));
+    footer.appendChild(btn);
+  }
+
   yga.widget = {
     render(list) {
+      lastList = list;
       const widget = document.querySelector('[data-yga="widget"]');
       if (!widget) return;
       const host = widget.querySelector(".yga-list");
@@ -108,18 +388,34 @@ window.yga = window.yga || {};
 
       if (!list) {
         host.appendChild(placeholderRow("loadingSubs"));
+        renderFooter(widget);
         return;
       }
       if (!list.length) {
-        host.appendChild(placeholderRow("emptyState"));
+        host.appendChild(placeholderRow(emptyKey()));
+        renderFooter(widget);
         return;
       }
-      const sorted = list.slice().sort((a, b) =>
-        a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
-      );
       const frag = document.createDocumentFragment();
-      for (const sub of sorted) frag.appendChild(rowNode(sub));
+      for (const sub of sortRows(list)) frag.appendChild(rowNode(sub));
       host.appendChild(frag);
+      renderFooter(widget);
+      const picker = widget.querySelector(".yga-picker");
+      if (picker) fillPicker(picker);
+    },
+
+    // Repaint after an account re-key: the picker must see the new catalog.
+    refresh() {
+      const widget = document.querySelector('[data-yga="widget"]');
+      const wasOpen = !!(widget && widget.querySelector(".yga-picker"));
+      pickerData = null;
+      yga.state.getVisibleSubs().then(async (list) => {
+        yga.widget.render(list);
+        if (!wasOpen) return;
+        await loadPickerData();
+        const picker = document.querySelector('[data-yga="widget"] .yga-picker');
+        if (picker) fillPicker(picker);
+      });
     }
   };
 
@@ -142,7 +438,11 @@ window.yga = window.yga || {};
       sections.appendChild(widget);
     }
 
-    if (yga.state) yga.widget.render(yga.state.getSubs());
+    if (yga.state) yga.state.getVisibleSubs().then((list) => yga.widget.render(list));
+    if (yga.profiles) {
+      resetPicker(widget); // a rebuilt widget never inherits an open picker
+      wireProfiles(widget);
+    }
     return widget;
   };
 })(window.yga);

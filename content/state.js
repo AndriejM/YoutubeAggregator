@@ -3,10 +3,10 @@ window.yga = window.yga || {};
 (function (yga) {
   "use strict";
 
-  // Subs cache yga:subs:<accountKey> (PLAN.md §5). Stage 1 uses a fixed key;
-  // real account detection arrives in stage 2 (PLAN.md §11).
-  const ACCOUNT_KEY = "default";
-  const CACHE_KEY = "yga:subs:" + ACCOUNT_KEY;
+  // Subs cache yga:subs:<accountKey> (PLAN.md §5); the key is set by
+  // accounts.js detection (fallback "default"). Legacy fixed key is migrated.
+  let accountKey = "default";
+  let CACHE_KEY = "yga:subs:default";
   const WRITE_DEBOUNCE_MS = 300; // storage write-amplification guard (PLAN.md §5)
 
   const listeners = new Set();
@@ -39,6 +39,19 @@ window.yga = window.yga || {};
   function scheduleWrite() {
     if (writeTimer) clearTimeout(writeTimer);
     writeTimer = setTimeout(flushWrite, WRITE_DEBOUNCE_MS);
+  }
+
+  // Channels of the active profile (PLAN.md §5 composition rules).
+  // null = catalog not loaded yet → the widget shows its loading placeholder.
+  async function profileView() {
+    if (!subs) return null;
+    const all = Array.from(subs.values());
+    if (!yga.profiles) return all;
+    const id = await yga.profiles.activeProfileId();
+    const ids = await yga.profiles.syncProfile(id, all);
+    if (!ids) return all;
+    const wanted = new Set(ids);
+    return all.filter((s) => wanted.has(s.channelId));
   }
 
   // Returns true if the catalog changed (PLAN.md §11: refresh only on YouTube-side change).
@@ -81,6 +94,29 @@ window.yga = window.yga || {};
   }
 
   yga.state = {
+    // Called after account detection; migrates the legacy stage-1 cache and
+    // re-renders listeners under the new key (PLAN.md §5). Returns true when
+    // the key actually changed, so the widget can drop account-scoped UI state.
+    async setAccountKey(key) {
+      if (!key || key === accountKey) return false;
+      accountKey = key;
+      CACHE_KEY = "yga:subs:" + key;
+      const stored = await chrome.storage.local.get(CACHE_KEY);
+      if (stored[CACHE_KEY]) {
+        subs = null; // force reload under the new key
+      } else {
+        const legacy = await chrome.storage.local.get("yga:subs:default");
+        subs = legacy["yga:subs:default"] ? deserialize(legacy["yga:subs:default"]) : null;
+        if (subs) {
+          flushWrite();
+          await chrome.storage.local.remove("yga:subs:default");
+        }
+      }
+      if (!subs) await this.loadCache();
+      await emit();
+      return true;
+    },
+
     async loadCache() {
       if (subs) return subs;
       const stored = await chrome.storage.local.get(CACHE_KEY);
@@ -94,13 +130,27 @@ window.yga = window.yga || {};
       const changed = mergeIntoCache(list);
       if (changed) {
         scheduleWrite();
-        emit();
+        await emit();
       }
       return subs;
     },
 
-    getSubs() {
+    // Channels of the ACTIVE profile (stage 2), not the whole catalog.
+    async getVisibleSubs() {
+      if (!subs) await this.loadCache();
+      return profileView();
+    },
+
+    // The whole catalog, ignoring membership — for the channel picker (§9.2.1).
+    async getAllSubs() {
+      if (!subs) await this.loadCache();
       return subs ? Array.from(subs.values()) : [];
+    },
+
+    // Re-render listeners from cache after a profile switch (§11 stage 2:
+    // switching must not trigger a YouTube request).
+    async refreshVisible() {
+      await emit();
     },
 
     onSubsChanged(cb) {
@@ -109,8 +159,8 @@ window.yga = window.yga || {};
     }
   };
 
-  function emit() {
-    const snapshot = Array.from(subs.values());
+  async function emit() {
+    const snapshot = await profileView();
     for (const cb of listeners) {
       try {
         cb(snapshot);

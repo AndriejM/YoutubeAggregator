@@ -26,5 +26,61 @@
   "emptyState": {
     "message": "Подписки не найдены",
     "description": "Заглушка пустого списка каналов"
+  },
+  "profilesLabel": {
+    "message": "Профиль",
+    "description": "Aria-метка комбобокса профилей"
+  },
+  "profileAllSubs": {
+    "message": "Все подписки",
+    "description": "Название служебного профиля"
+  },
+  "newProfile": {
+    "message": "＋ Новый профиль…",
+    "description": "Опция комбобокса для создания профиля"
+  },
+  "newProfilePrompt": {
+    "message": "Название нового профиля",
+    "description": "Текст запроса имени при создании профиля"
+  },
+  "renameProfile": {
+    "message": "Переименовать профиль",
+    "description": "Aria-метка кнопки переименования профиля"
+  },
+  "renameProfilePrompt": {
+    "message": "Название профиля",
+    "description": "Текст запроса имени при переименовании профиля"
+  },
+  "deleteProfile": {
+    "message": "Удалить профиль",
+    "description": "Aria-метка кнопки удаления профиля"
+  },
+  "deleteProfileConfirm": {
+    "message": "Удалить профиль и его состав каналов? Подписки YouTube не пострадают.",
+    "description": "Второе подтверждение перед удалением профиля"
+  },
+  "emptyProfile": {
+    "message": "В этом профиле пока нет каналов",
+    "description": "Заглушка пустого курируемого профиля"
+  },
+  "addChannels": {
+    "message": "＋ Добавить каналы",
+    "description": "Кнопка открытия выбора каналов профиля"
+  },
+  "pickerClose": {
+    "message": "Готово",
+    "description": "Кнопка закрытия выбора каналов профиля"
+  },
+  "pickerSearch": {
+    "message": "Поиск каналов",
+    "description": "Плейсхолдер поля поиска в выборе каналов"
+  },
+  "pickerMore": {
+    "message": "Подходит каналов: {count} — уточните поиск",
+    "description": "Подсказка при обрезке длинного списка в выборе каналов"
+  },
+  "pickerEmpty": {
+    "message": "Ни один канал не подходит",
+    "description": "Заглушка, когда фильтр выбора каналов ничего не нашёл"
   }
 }

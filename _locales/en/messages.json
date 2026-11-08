@@ -26,5 +26,61 @@
   "emptyState": {
     "message": "No subscriptions found",
     "description": "Placeholder row when the channel list is empty"
+  },
+  "profilesLabel": {
+    "message": "Profile",
+    "description": "Aria label of the profile combobox"
+  },
+  "profileAllSubs": {
+    "message": "All subscriptions",
+    "description": "Name of the built-in profile"
+  },
+  "newProfile": {
+    "message": "+ New profile…",
+    "description": "Combobox option that creates a profile"
+  },
+  "newProfilePrompt": {
+    "message": "New profile name",
+    "description": "Prompt text when creating a profile"
+  },
+  "renameProfile": {
+    "message": "Rename profile",
+    "description": "Aria label for the rename profile button"
+  },
+  "renameProfilePrompt": {
+    "message": "Profile name",
+    "description": "Prompt text when renaming a profile"
+  },
+  "deleteProfile": {
+    "message": "Delete profile",
+    "description": "Aria label for the delete profile button"
+  },
+  "deleteProfileConfirm": {
+    "message": "Delete this profile and its channel composition? YouTube subscriptions are not affected.",
+    "description": "Second confirmation before deleting a profile"
+  },
+  "emptyProfile": {
+    "message": "This profile has no channels yet",
+    "description": "Placeholder row for an empty curated profile"
+  },
+  "addChannels": {
+    "message": "+ Add channels",
+    "description": "Button that opens the channel membership picker"
+  },
+  "pickerClose": {
+    "message": "Done",
+    "description": "Button that closes the channel membership picker"
+  },
+  "pickerSearch": {
+    "message": "Search channels",
+    "description": "Placeholder of the picker search field"
+  },
+  "pickerMore": {
+    "message": "{count} channels match — refine the search",
+    "description": "Hint when the picker truncates a long result list"
+  },
+  "pickerEmpty": {
+    "message": "No channels match the search",
+    "description": "Placeholder when the picker filter matches nothing"
   }
 }

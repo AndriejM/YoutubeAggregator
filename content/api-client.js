@@ -71,9 +71,9 @@ window.yga = window.yga || {};
         console.info(`[yga] subscriptions: guide=${guideCount}, browse=${browseCount}`);
       }
       await yga.state.loadCache();
-      if (!list.length) return yga.state.getSubs(); // keep cache on total failure
+      if (!list.length) return yga.state.getVisibleSubs(); // keep cache on total failure
       await yga.state.updateSubs(list);
-      return yga.state.getSubs();
+      return yga.state.getVisibleSubs();
     }
   };
 })(window.yga);

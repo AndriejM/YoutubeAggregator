@@ -228,15 +228,62 @@
       return fetchChannelsPage("/feed/subscriptions");
     }
 
+    // Current account. ytcfg is the only source guaranteed on every page:
+    // EXTERNAL_CHANNEL_ID / SERVICES.authUser carry the logged-in channel id
+    // (already proven by own-channel filtering of the subscriptions list).
+    // The masthead account item is shadow-DOM and often absent from
+    // ytInitialData, so it only adds the human title/avatar when present.
+    function findAccountItem() {
+      const data = window.ytInitialData;
+      if (!data) return null;
+      let best = null;
+      walk(data, (obj) => {
+        const it = obj.accountItemRenderer || obj.switchAccountItemRenderer ||
+          obj.myAccountRenderer;
+        if (it && !best) best = it;
+      }, 0);
+      return best;
+    }
+
+    function accountHandleFrom(item) {
+      let handle = "";
+      walk(item, (inner) => {
+        if (handle) return;
+        const ep = inner.navigationEndpoint && inner.navigationEndpoint.browseEndpoint;
+        if (ep && typeof ep.canonicalBaseUrl === "string" &&
+            ep.canonicalBaseUrl.indexOf("/@") === 0) {
+          handle = ep.canonicalBaseUrl.slice(2);
+        }
+        const wcm = inner.webCommandMetadata;
+        if (!handle && wcm && typeof wcm.url === "string" && wcm.url.indexOf("/@") === 0) {
+          handle = wcm.url.slice(2);
+        }
+      }, 0);
+      return handle;
+    }
+
     function cmdGetAccountInfo() {
       const cfg = window.ytcfg && ytcfg.data_;
-      if (!cfg) return null;
-      return {
-        apiKey: cfg.INNERTUBE_API_KEY || "",
-        dataOnEmbedUrl: cfg.DATA_ON_EMBEDDED_UI_URL || "",
+      const channelId = ownChannelId();
+      const account = {
+        apiKey: cfg && cfg.INNERTUBE_API_KEY || "",
+        loggedIn: !!(cfg && cfg.LOGGED_IN),
         pageHostname: location.hostname,
-        loggedIn: !!cfg.LOGGED_IN
+        accountKey: channelId,
+        channelId: channelId,
+        sessionIndex: cfg && typeof cfg.SESSION_INDEX === "number" ? cfg.SESSION_INDEX : null,
+        title: "", avatarUrl: "", handle: ""
       };
+      const item = findAccountItem();
+      if (item) {
+        account.title = txt(item.title) || txt(item.selectedAccountName) ||
+          txt(item.fullName) || "";
+        account.avatarUrl = (item.accountPortrait && avatarOf(item.accountPortrait)) ||
+          avatarOf(item) || avatarFromAny(item);
+        account.handle = accountHandleFrom(item);
+        if (!account.accountKey) account.accountKey = account.handle || account.title || "";
+      }
+      return account;
     }
 
     const COMMANDS = {
