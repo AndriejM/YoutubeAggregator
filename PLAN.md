@@ -226,9 +226,9 @@ Google/YouTube. Подписки при этом берутся из одног�
 
 | Задача | Источник | Примечание |
 |---|---|---|
-| Список подписок (id, title, avatar) | `window.ytInitialGuideData` → `guideSubscriptionsSectionRenderer` | Дёшево, без запросов; уже на странице |
-| Список подписок (fallback, полный) | `POST /youtubei/v1/browse`, `browseId: "FEED_SUBSCRIPTIONS"` + пагинация `continuation` | `context`/`INNERTUBE_API_KEY` берём из `ytcfg` страницы |
-| Список подписок (fallback 2) | `GET /feed/channels` → парсинг `ytInitialData` | Если browse недоступен |
+| Список подписок (id, title, avatar) | `window.ytInitialGuideData` → `guideSubscriptionsSectionRenderer` | Дёшево, без запросов; на текущем YouTube (2026-11) `ytInitialGuideData` на window отсутствует — оставляем как бесплатную первую попытку |
+| Список подписок (fallback, полный) | `GET /feed/channels` → парсинг `ytInitialData`/`ytInitialJSONLData` (page-world fetch через мост) | Проверено 2026-11-08: 995 каналов. `POST /youtubei/v1/browse` НЕ годится: требует `Authorization: SAPISIDHASH`, доступный только самой странице (из content/SW — 403) |
+| Список подписок (fallback 2) | `GET /feed/subscriptions` → парсинг `ytInitialData` | Если /feed/channels недоступен |
 | Новые видео канала | `GET /feeds/videos.xml?channel_id=<id>` (15 самых свежих записей) | Без авторизации; парсим `DOMParser` → `entry/published` |
 | Аккаунт (для `accountKey`, не для профилей) | DOM `ytd-masthead` `accountItem`; резерв `GET /getAccountSwitcherEndpoint` | Профили локальные (§5); аккаунт нужен только как ключ каталога подписок |
 | Тема/язык/страна | `html[dark]`, `ytcfg.INNERTUBE_CONTEXT.hl/gl` | Для локализации и стиля панели |
@@ -243,12 +243,14 @@ Google/YouTube. Подписки при этом берутся из одног�
 Content script живёт в isolated world и **не видит** `window.ytInitialData`/`ytcfg`.
 Поэтому:
 
-- `page/bridge.js` вставляется в main world через `<script src=chrome.runtime.getURL('page/bridge.js')>`.
-- Обмен — `window.postMessage` с `__yga:cmd`/`__yga:resp` и `nonce`, который
+- `page/bridge.js` доставляется как `content_scripts` с `"world": "MAIN"`
+  (инъекция `<script src=chrome-extension://…>` блокируется CSP YouTube).
+  Обмен — `window.postMessage` с `__yga:cmd`/`__yga:resp` и `nonce`, который
   генерирует isolated-скрипт; ответ принимается только при совпадении `nonce` и
   `event.source === window`.
-- Мост умеет ровно четыре вещи: `getGuideSubscriptions()`, `getContext()` (hl/gl/apiKey/visitorData),
-  `browseSubscriptions()` (с continuation), `getAccountInfo()` (текущий аккаунт для `accountKey`).
+- Мост умеет ровно пять вещей: `getGuideSubscriptions()`, `getContext()`,
+  `browseSubscriptions()` (реализован как `GET /feed/channels`, см. §6),
+  `getSubscriptionsPage()` (`GET /feed/subscriptions`), `getAccountInfo()`.
   Никакого произвольного eval и никаких вызовов с произвольными аргументами.
 - `GET /feeds/videos.xml` делает **service worker** (у него есть `host_permissions`),
   а не страница — чтобы не зависеть от CORS и не плодить запросы в page world.
@@ -598,6 +600,7 @@ youtube.com (SPA-навигация, тёмная/светлая тема, св�
 | Дата | Изменение |
 |---|---|
 | 2026-11-08 | Функциональные требования MVP: виджет показывает **группы каналов** вместо плоского списка (§18). Добавлен раздел 18. |
+| 2026-11-08 | Этапы 0–1 проверены в браузере: виджет монтируется, список подписок = 995 каналов через `GET /feed/channels`. Поправки: мост — `content_scripts world:MAIN` (CSP), browse — только page-world (`SAPISIDHASH`), вытачка JSON — balanced-brace, own-channel фильтруется. §6, §7. |
 | 2026-11-08 | Мост `page/bridge.js` доставляется как `content_scripts` с `"world": "MAIN"` (Chrome 111+) вместо `<script src=…>` — CSP YouTube блокирует такую инъекцию. WAR сокращена до `icons/*`. Этап 1: гайд-данные с retry на гонку моста, fallback browse через SW. |
 | 2026-11-08 | Второй способ назначения канала в группу: инлайн-кнопка «Группа» в шапке страницы канала (§8.8, §18.5, этап 5, §13.13). |
 | 2026-11-07 | Зафиксированы решения: профиль = локальный набор каналов; обнуление счётчика по клику в виджете; обновление счётчиков — гибрид (onOpen + настраиваемый scheduled); панель конфигурации — инлайн-DOM в `#content` (без iframe); целевая платформа — только Chrome MV3. Обновлены разделы 3, 4, 5, 6, 8, 10, 11, 12, 15 |
