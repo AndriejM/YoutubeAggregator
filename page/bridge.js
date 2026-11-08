@@ -53,6 +53,12 @@
   }
 
     function pickId(obj) {
+      // Exact known paths first (channelRenderer family).
+      for (const p of [obj.subscriberContent, obj.channelRenderer, obj.videoOwnerRenderer]) {
+        if (p && typeof p.channelId === "string" && p.channelId.indexOf("UC") === 0) {
+          return p.channelId;
+        }
+      }
       const be = obj.browseEndpoint ||
         obj.navigationEndpoint && obj.navigationEndpoint.browseEndpoint;
       if (be && typeof be.browseId === "string" && be.browseId.indexOf("UC") === 0) {
@@ -64,14 +70,40 @@
       }
       const direct = obj.channelId || obj.externalId || obj.contentId || obj.browseId;
       if (typeof direct === "string" && direct.indexOf("UC") === 0) return direct;
+      // Any endpoint payload carrying a UC id (browse/watch/listWatch).
+      for (const key of ["browseEndpoint", "watchEndpoint", "listWatchEndpoint", "browseByIdEndpoint"]) {
+        for (const ep of [obj[key], obj[key] && obj[key].commandMetadata &&
+          obj[key].commandMetadata.webCommandMetadata]) {
+          if (ep && typeof ep.browseId === "string" && ep.browseId.indexOf("UC") === 0) {
+            return ep.browseId;
+          }
+          if (ep && typeof ep.videoId === "string" && obj[key].browseId &&
+              String(obj[key].browseId).indexOf("UC") === 0) {
+            return obj[key].browseId;
+          }
+        }
+      }
       return null;
+    }
+
+    function avatarFromAny(obj) {
+      let url = "";
+      walk(obj, (inner) => {
+        if (url) return;
+        const cand = inner.thumbnails && inner.thumbnails[inner.thumbnails.length - 1] ||
+          inner.sources && inner.sources[0];
+        const u = cand && cand.url;
+        if (typeof u === "string" && /ytimg|i\.ytimg|googleusercontent/.test(u)) url = u;
+      }, 0);
+      return url;
     }
 
     function extractSubs(root) {
       const found = new Map();
+      const own = ownChannelId();
       walk(root, (obj) => {
         const id = pickId(obj);
-        if (!id || found.has(id)) return;
+        if (!id || found.has(id) || (own && id === own)) return;
         let title = titleOf(obj);
         if (!title) {
           // collectionViewModel: title/avatar live in child view models.
@@ -83,7 +115,8 @@
           }, 0);
         }
         if (!title) return;
-        found.set(id, { channelId: id, title: title, avatarUrl: avatarOf(obj) });
+        const avatarUrl = avatarOf(obj) || avatarFromAny(obj);
+        found.set(id, { channelId: id, title: title, avatarUrl: avatarUrl });
       }, 0);
       return Array.from(found.values());
     }
@@ -122,7 +155,20 @@
     };
   }
 
-  // Full subscriptions page (PLAN.md §6 fallback2): plain HTML with
+    // Own channel id from ytcfg ("Create post" chip in feeds points here).
+    function ownChannelId() {
+      try {
+        const cfg = window.ytcfg && ytcfg.data_;
+        if (!cfg) return "";
+        if (typeof cfg.EXTERNAL_CHANNEL_ID === "string") return cfg.EXTERNAL_CHANNEL_ID;
+        const svc = (cfg.SERVICES || []).find((s) => s && s.authUser);
+        return svc && svc.channelId || "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    // Full subscriptions page (PLAN.md §6 fallback2): plain HTML with
     // ytInitialData — works with the page session, unlike youtubei/browse,
     // which requires the page-only SAPISIDHASH authorization header.
     function fetchChannelsPage(path) {
