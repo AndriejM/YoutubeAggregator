@@ -42,8 +42,8 @@
       (typeof obj.content === "string" ? "" : "");
   }
 
-  function walk(node, visit, depth) {
-    if (!node || typeof node !== "object" || depth > 16) return;
+    function walk(node, visit, depth) {
+      if (!node || typeof node !== "object" || depth > 40) return;
     visit(node);
     if (Array.isArray(node)) {
       for (const child of node) walk(child, visit, depth + 1);
@@ -168,6 +168,40 @@
       }
     }
 
+    // Balanced-brace JSON extractor: regex over megabyte scripts is fragile
+    // (lazy .+? truncates, greedy .+ overshoots into sibling script tags).
+    function grabJson(text, marker) {
+      const at = text.indexOf(marker);
+      if (at < 0) return "";
+      const start = text.indexOf("{", at);
+      if (start < 0) return "";
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (inStr) {
+          if (esc) esc = false;
+          else if (ch === "\\") esc = true;
+          else if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === "{" || ch === "[") depth++;
+        else if (ch === "}" || ch === "]") {
+          if (--depth === 0) return text.slice(start, i + 1);
+        }
+      }
+      return "";
+    }
+
+    function parseEmbedded(jsonText, label, sink) {
+      if (!jsonText) return;
+      try {
+        sink(extractSubs(JSON.parse(jsonText)));
+      } catch (e) {
+        console.warn("[yga] failed to parse " + label + ":", e);
+      }
+    }
+
     // Full subscriptions page (PLAN.md §6 fallback2): plain HTML with
     // ytInitialData — works with the page session, unlike youtubei/browse,
     // which requires the page-only SAPISIDHASH authorization header.
@@ -176,16 +210,13 @@
         if (!res.ok) throw new Error(path + " HTTP " + res.status);
         return res.text();
       }).then((html) => {
-        const m = html.match(/ytInitialData\s*=\s*(\{.+?\});\s*<\/script>/s) ||
-          html.match(/window\["ytInitialData"\]\s*=\s*(\{.+?\});/s);
-        if (!m) return [];
-        const json = JSON.parse(m[1]);
-        const subs = extractSubs(json);
-        if (!subs.length) {
-          const jm = html.match(/ytInitialJSONLData\s*=\s*(\{.+?\});\s*<\/script>/s);
-          if (jm) subs.push(...extractSubs(JSON.parse(jm[1])));
-        }
-        return subs;
+        const merged = new Map();
+        const absorb = (subs) => subs.forEach((s) => {
+          if (!merged.has(s.channelId)) merged.set(s.channelId, s);
+        });
+        parseEmbedded(grabJson(html, 'ytInitialData = {'), "ytInitialData", absorb);
+        if (!merged.size) parseEmbedded(grabJson(html, 'ytInitialJSONLData = {'), "ytInitialJSONLData", absorb);
+        return Array.from(merged.values());
       });
     }
 
