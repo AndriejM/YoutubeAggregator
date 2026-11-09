@@ -1,0 +1,329 @@
+/* Configuration panel (PLAN.md §8.7, §9.2) — inline DOM in ytd-app > #content.
+   Theme follows YouTube through --yt-spec-* custom properties. */
+
+.yga-panel {
+  --yga-fg: var(--yt-spec-text-primary, #0f0f0f);
+  --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
+  --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
+  --yga-border: var(--yt-spec-outline, rgba(0, 0, 0, 0.15));
+  --yga-accent: #c00;
+  --yga-surface: var(--yt-spec-general-background-a, #fff);
+
+  box-sizing: border-box;
+  display: block;
+  /* YT-override: the masthead is fixed, so the panel must clear it itself */
+  min-height: calc(100vh - 56px);
+  padding: 16px 24px 64px;
+  color: var(--yga-fg);
+  background: var(--yga-surface);
+  font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
+  font-size: 14px;
+  contain: layout style;
+}
+
+.yga-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 900px;
+  margin: 0 auto 12px;
+}
+
+.yga-panel-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.yga-panel-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.yga-panel-close:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-panel-close:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-panel-body {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.yga-panel-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--yga-border);
+}
+
+.yga-panel-section-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.yga-panel-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 6px 0;
+}
+
+.yga-panel-label {
+  flex: 0 0 40%;
+  padding-top: 4px;
+  color: var(--yga-fg);
+}
+
+.yga-panel-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.yga-panel-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--yga-fg-dim);
+}
+
+.yga-panel-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.yga-panel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.yga-panel-rows {
+  display: block;
+}
+
+/* Long catalogs scroll inside the section, not the page (§9.2.1) */
+.yga-panel-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  border: 1px solid var(--yga-border);
+  border-radius: 8px;
+}
+
+.yga-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.yga-panel-row:hover {
+  background: var(--yga-hover);
+}
+
+.yga-panel-row.yga-panel-selected {
+  background: var(--yga-hover);
+  outline: 1px solid var(--yga-accent);
+  outline-offset: -1px;
+}
+
+.yga-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.yga-panel-meta {
+  flex: 0 0 auto;
+  min-width: 24px;
+  font-size: 12px;
+  color: var(--yga-fg-dim);
+  text-align: right;
+}
+
+.yga-panel-count {
+  min-width: 28px;
+  padding: 0 6px;
+  color: #fff;
+  background: var(--yga-accent);
+  border-radius: 9px;
+  text-align: center;
+}
+
+.yga-panel-count:empty {
+  background: transparent;
+}
+
+.yga-panel-group {
+  flex: 0 0 22%;
+  text-align: left;
+}
+
+.yga-panel-avatar {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--yga-hover);
+  object-fit: cover;
+}
+
+.yga-panel-avatar:not([src]) {
+  visibility: hidden;
+}
+
+.yga-panel-avatar-empty {
+  visibility: visible;
+}
+
+.yga-panel-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.yga-panel-account-text {
+  min-width: 0;
+}
+
+.yga-panel-placeholder {
+  padding: 8px 0;
+  color: var(--yga-fg-dim);
+  font-size: 13px;
+}
+
+.yga-panel-input,
+.yga-panel-select {
+  box-sizing: border-box;
+  height: 28px;
+  max-width: 240px;
+  font: inherit;
+  color: var(--yga-fg);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.yga-panel-search {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.yga-panel-num {
+  max-width: 96px;
+}
+
+.yga-panel-color {
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.yga-panel-input:focus-visible,
+.yga-panel-select:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-panel-check {
+  accent-color: var(--yga-accent);
+  cursor: pointer;
+}
+
+.yga-panel-btn,
+.yga-panel-icon {
+  flex: 0 0 auto;
+  height: 26px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.yga-panel-btn:hover,
+.yga-panel-icon:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-panel-btn:focus-visible,
+.yga-panel-icon:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-panel-btn:disabled,
+.yga-panel-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.yga-panel-primary {
+  color: var(--yga-accent);
+  border-color: var(--yga-accent);
+}
+
+.yga-panel-danger {
+  color: #c00;
+}
+
+.yga-panel-file {
+  font: inherit;
+  font-size: 13px;
+  color: var(--yga-fg-dim);
+  max-width: 260px;
+}
+
+.yga-panel-hidden-link {
+  display: none;
+}
+
+/* theme.followYouTube: false — pin the light palette over html[dark] (§2) */
+.yga-panel.yga-force-light {
+  --yga-fg: #0f0f0f;
+  --yga-fg-dim: #606060;
+  --yga-hover: rgba(0, 0, 0, 0.05);
+  --yga-border: rgba(0, 0, 0, 0.15);
+  --yga-surface: #fff;
+  color: #0f0f0f;
+}
+
+/* YT-override: the page behind the panel must not scroll (§8.7) */
+html.yga-scroll-lock,
+body.yga-scroll-lock {
+  overflow: hidden !important;
+}

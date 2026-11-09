@@ -367,12 +367,49 @@ window.yga = window.yga || {};
       return 0;
     },
 
+    // Bulk "mark watched" for the config panel (§9.2.1): one worker write and
+    // one mirror adopt for the whole selection, so a 200-channel bulk op does
+    // not become 200 composition writes.
+    async markVisitedBatch(profileId, channelIds) {
+      if (!profileId || !channelIds || !channelIds.length) return 0;
+      try {
+        const res = await chrome.runtime.sendMessage({
+          type: "counters:setVisits",
+          profileId: profileId,
+          channelIds: channelIds
+        });
+        if (res && res.ok) {
+          if (compWriter) {
+            const comp = await yga.profiles.getComposition(profileId);
+            for (const id of channelIds) {
+              if (!id) continue;
+              comp[id] = Object.assign({}, comp[id], { lastVisitAt: res.lastVisitAt });
+            }
+            compWriter.adopt(profileId, comp);
+          }
+          emitCounters();
+          return res.lastVisitAt;
+        }
+        if (res && res.error) console.debug("[yga] markVisitedBatch:", res.error);
+      } catch (e) {
+        console.warn("[yga] markVisitedBatch failed:", e);
+      }
+      return 0;
+    },
+
     getAggregate() {
       return aggregate;
     },
 
     countersReady() {
       return counts.size > 0;
+    },
+
+    // Raw worker record for one channel (config panel §9.2.1): lets the panel
+    // derive the same lastVisitAt view as decorate() without re-running
+    // syncProfile on every keystroke.
+    countOf(channelId) {
+      return counts.get(channelId) || null;
     },
 
     onCountersChanged(cb) {

@@ -9,7 +9,12 @@ research is kept under `examples/` and is not part of the shipped extension.
 
 ## Status
 
-Planning phase. See [PLAN.md](PLAN.md) for architecture, data model, milestones and
+Stages 0–4 are implemented (skeleton + guide mount, subscriptions, local profiles,
+new-video counters, inline configuration panel); stage 5 (channel groups) is next.
+Everything is verified outside the browser by `node test/logic.mjs` and `node test/dom.mjs`;
+in-browser verification against live youtube.com has not been done yet.
+
+See [PLAN.md](PLAN.md) for architecture, data model, milestones and
 accepted decisions (document written in Russian).
 
 ## Planned core UI

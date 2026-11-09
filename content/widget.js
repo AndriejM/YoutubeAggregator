@@ -47,6 +47,96 @@ window.yga = window.yga || {};
   let profileUnsub = null; // one live listener across SPA remounts
   let lastActiveId = null; // active profile of the mounted widget (empty states)
 
+  // --- widget-scoped settings (stage 4, PLAN.md §9) ---
+  // The config panel writes yga:settings; the widget follows through
+  // profiles.onSettingsChanged, so every edit lands without a reload.
+  let settings = null;
+  let unsubSettings = null;
+  let mountedPosition = null;
+  let themeObserver = null;
+
+  function widgetCfg() {
+    return (settings && settings.widget) || {};
+  }
+
+  function positionOf(s) {
+    return ((s && s.widget) || {}).position || "afterSubscriptions";
+  }
+
+  function applyWidgetSettings(widget) {
+    const cfg = widgetCfg();
+    widget.style.setProperty("--yga-width", (Number(cfg.widthPx) || 300) + "px");
+    widget.classList.toggle("yga-compact", !!cfg.compact);
+    widget.classList.toggle("yga-no-counts", cfg.showCounts === false);
+  }
+
+  // Accent + theme-follow for both surfaces (widget and config panel).
+  function applyTheme() {
+    const t = (settings && settings.theme) || {};
+    const accent = /^#[0-9a-f]{6}$/i.test(t.accent || "") ? t.accent : "#c00";
+    const forceLight = t.followYouTube === false;
+    const nodes = document.querySelectorAll(".yga-widget, .yga-panel");
+    for (const node of nodes) {
+      node.style.setProperty("--yga-accent", accent);
+      if (forceLight) {
+        node.classList.add("yga-force-light");
+        if (yga.theme && yga.theme.clear) yga.theme.clear(node);
+      } else {
+        node.classList.remove("yga-force-light");
+        if (yga.theme && yga.theme.apply) yga.theme.apply(node);
+      }
+    }
+  }
+
+  function wireTheme() {
+    if (themeObserver || typeof MutationObserver !== "function") return;
+    themeObserver = new MutationObserver(() => applyTheme());
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["dark", "class", "style"]
+    });
+  }
+
+  // One settings edit, applied as cheaply as possible: width/compact/counts are
+  // CSS-only, zero-count visibility is a counter repaint, position is a remount.
+  function onSettings(next) {
+    const previous = settings;
+    settings = next;
+    const widget = document.querySelector('[data-yga="widget"]');
+    if (!widget) return;
+    if (positionOf(next) !== mountedPosition) {
+      widget.remove(); // position is a mount decision, not a repaint
+      yga.mountWidget();
+      return;
+    }
+    const before = (previous && previous.widget) || {};
+    const after = next.widget || {};
+    applyWidgetSettings(widget);
+    applyTheme();
+    if (before.showZeroCount !== after.showZeroCount) yga.widget.applyCounts(lastList);
+  }
+
+  function wireSettings() {
+    if (!yga.profiles) return;
+    if (unsubSettings) unsubSettings();
+    unsubSettings = yga.profiles.onSettingsChanged(onSettings);
+    // The mount above used defaults; adopt the stored settings once loaded and
+    // remount only if the recorded position differs from the one we used.
+    yga.profiles.getSettings().then((stored) => {
+      if (settings) return; // a change event already primed the mirror
+      settings = stored;
+      const widget = document.querySelector('[data-yga="widget"]');
+      if (!widget) return;
+      if (positionOf(stored) !== mountedPosition) {
+        widget.remove();
+        yga.mountWidget();
+        return;
+      }
+      applyWidgetSettings(widget);
+      applyTheme();
+    });
+  }
+
   function wireProfiles(widget) {
     const select = widget.querySelector(".yga-profile-select");
     const rename = widget.querySelector(".yga-profile-rename");
@@ -143,6 +233,10 @@ window.yga = window.yga || {};
       title: yga.i18n("configButton")
     });
     gear.innerHTML = GEAR_SVG; // static markup, no YouTube data (PLAN.md §12)
+    // Stage 4: the gear opens the inline configuration panel in #content (§8.7).
+    gear.addEventListener("click", () => {
+      if (yga.panel) yga.panel.toggle();
+    });
 
     const rename = el("button", "yga-profile-rename", {
       type: "button",
@@ -212,7 +306,8 @@ window.yga = window.yga || {};
   function paintCount(row, sub) {
     const count = row.querySelector(".yga-count");
     if (!count) return;
-    const zero = !sub.counterError && sub.newCount === 0;
+    // showZeroCount (§9): a zero chip is hidden by default, shown when asked.
+    const zero = !sub.counterError && sub.newCount === 0 && !widgetCfg().showZeroCount;
     count.textContent = zero ? "" : countText(sub);
     count.title = countTitle(sub);
     count.setAttribute("aria-label", countTitle(sub));
@@ -444,6 +539,9 @@ window.yga = window.yga || {};
       return lastList;
     },
 
+    // Re-tint after the config panel is built (panel.js, PLAN.md §8.7).
+    applyTheme: applyTheme,
+
     render(list) {
       lastList = list;
       const widget = document.querySelector('[data-yga="widget"]');
@@ -499,6 +597,22 @@ window.yga = window.yga || {};
     }
   };
 
+  // Mount point chosen by widget.position (PLAN.md §8.3, panel section «Виджет»).
+  function insertWidget(widget, position, sections) {
+    if (position === "top") {
+      const root = yga.selectors.find("guideRoot") || sections;
+      root.insertBefore(widget, root.children[0] || null);
+      return;
+    }
+    const link = yga.selectors.find("subscriptionsLink");
+    if (link) {
+      const host = link.closest("yt-section") || link.parentNode;
+      host.insertAdjacentElement("afterend", widget);
+    } else {
+      sections.appendChild(widget);
+    }
+  }
+
   // Idempotent mount (PLAN.md §8.2, §8.3): reuses a live node, rehangs a detached one.
   yga.mountWidget = function mountWidget() {
     const existing = document.querySelector('[data-yga="widget"]');
@@ -510,13 +624,9 @@ window.yga = window.yga || {};
     if (!sections) return null;
 
     const widget = buildWidget();
-    const link = yga.selectors.find("subscriptionsLink");
-    if (link) {
-      const host = link.closest("yt-section") || link.parentNode;
-      host.insertAdjacentElement("afterend", widget);
-    } else {
-      sections.appendChild(widget);
-    }
+    mountedPosition = positionOf(settings);
+    insertWidget(widget, mountedPosition, sections);
+    applyWidgetSettings(widget);
 
     if (yga.state) yga.state.getVisibleSubs().then((list) => yga.widget.render(list));
     if (yga.profiles) {
@@ -524,6 +634,9 @@ window.yga = window.yga || {};
       wireProfiles(widget);
     }
     if (yga.counters) yga.counters.wire(widget);
+    wireSettings();
+    wireTheme();
+    applyTheme();
     return widget;
   };
 })(window.yga);

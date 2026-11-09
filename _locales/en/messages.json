@@ -114,5 +114,237 @@
   "newVideos": {
     "message": "{count} new videos",
     "description": "Tooltip of a channel counter chip"
+  },
+  "panelTitle": {
+    "message": "Configuration",
+    "description": "Heading of the inline configuration panel"
+  },
+  "panelClose": {
+    "message": "Close",
+    "description": "Aria label of the panel close button"
+  },
+  "panelSectionError": {
+    "message": "This section failed to load",
+    "description": "Placeholder when a panel section throws"
+  },
+  "sectionProfiles": {
+    "message": "Profiles",
+    "description": "Panel section: profile CRUD"
+  },
+  "sectionGroups": {
+    "message": "Groups",
+    "description": "Panel section: channel groups"
+  },
+  "sectionChannels": {
+    "message": "Channels",
+    "description": "Panel section: channel list of the active profile"
+  },
+  "sectionCounters": {
+    "message": "Counters",
+    "description": "Panel section: new-video counter settings"
+  },
+  "sectionWidget": {
+    "message": "Widget",
+    "description": "Panel section: widget settings"
+  },
+  "sectionTheme": {
+    "message": "Theme",
+    "description": "Panel section: theme settings"
+  },
+  "sectionData": {
+    "message": "Data",
+    "description": "Panel section: export, import, reset"
+  },
+  "accountLabel": {
+    "message": "YouTube account",
+    "description": "Caption of the account key in the profiles section"
+  },
+  "accountUnknown": {
+    "message": "Unknown account",
+    "description": "Account caption before detection succeeds"
+  },
+  "profileActive": {
+    "message": "Active profile",
+    "description": "Aria label of the profile active radio"
+  },
+  "groupsSoon": {
+    "message": "Channel groups arrive with stage 5.",
+    "description": "Placeholder of the groups section before stage 5"
+  },
+  "channelsSearch": {
+    "message": "Search channels",
+    "description": "Placeholder of the channel list search field"
+  },
+  "channelsSortTitle": {
+    "message": "Name",
+    "description": "Channel list sort option: by name"
+  },
+  "channelsSortCount": {
+    "message": "New videos",
+    "description": "Channel list sort option: by new-video counter"
+  },
+  "channelsShowAll": {
+    "message": "Show all subscriptions",
+    "description": "Toggle listing the whole catalog, not only profile members"
+  },
+  "channelsSelectAll": {
+    "message": "Select all",
+    "description": "Bulk action: select every listed channel"
+  },
+  "channelsSelectNone": {
+    "message": "Select none",
+    "description": "Bulk action: clear the selection"
+  },
+  "channelsSelected": {
+    "message": "Selected: {count}",
+    "description": "Counter next to the bulk actions"
+  },
+  "channelsAdd": {
+    "message": "Add",
+    "description": "Add a channel to the active profile"
+  },
+  "channelsRemove": {
+    "message": "Remove",
+    "description": "Remove a channel from the active profile"
+  },
+  "channelsMarkWatched": {
+    "message": "Mark watched",
+    "description": "Bulk action: reset counters of the selection"
+  },
+  "channelsMore": {
+    "message": "{count} channels match — refine the search",
+    "description": "Hint when the channel list is truncated"
+  },
+  "groupNone": {
+    "message": "No group",
+    "description": "Group chip of a channel without a group"
+  },
+  "resetCounter": {
+    "message": "Reset",
+    "description": "Reset the new-video counter of one channel"
+  },
+  "refreshMode": {
+    "message": "Refresh mode",
+    "description": "Label of the counter refresh mode select"
+  },
+  "refreshModeHint": {
+    "message": "On open queries only when the widget is opened; scheduled also polls in the background.",
+    "description": "Hint of the counter refresh mode select"
+  },
+  "refreshOnOpen": {
+    "message": "On open",
+    "description": "Refresh mode: only on widget open"
+  },
+  "refreshScheduled": {
+    "message": "Scheduled",
+    "description": "Refresh mode: background polling"
+  },
+  "scheduledEnabled": {
+    "message": "Enable scheduled refresh",
+    "description": "Toggle for background counter polling"
+  },
+  "scheduledEnabledHint": {
+    "message": "Background RSS polling via alarms. Off by default.",
+    "description": "Hint of the scheduled refresh toggle"
+  },
+  "scheduledPeriod": {
+    "message": "Period, minutes",
+    "description": "Label of the scheduled refresh period"
+  },
+  "scheduledPeriodHint": {
+    "message": "Minimum 60 minutes.",
+    "description": "Hint of the scheduled refresh period"
+  },
+  "scheduledMaxChannels": {
+    "message": "Max channels per run",
+    "description": "Label of the per-run channel cap"
+  },
+  "refreshBatch": {
+    "message": "Batch size",
+    "description": "Label of the RSS batch size"
+  },
+  "refreshMinInterval": {
+    "message": "Min interval, seconds",
+    "description": "Label of the per-channel minimum refresh interval"
+  },
+  "refreshMinIntervalHint": {
+    "message": "A channel is never re-fetched more often than this.",
+    "description": "Hint of the per-channel minimum refresh interval"
+  },
+  "widgetPosition": {
+    "message": "Widget position",
+    "description": "Label of the widget mount position select"
+  },
+  "widgetPositionHint": {
+    "message": "Where the widget is mounted inside the guide.",
+    "description": "Hint of the widget mount position select"
+  },
+  "widgetPositionGuide": {
+    "message": "After Subscriptions",
+    "description": "Widget position: below the subscriptions link"
+  },
+  "widgetPositionTop": {
+    "message": "Top of the guide",
+    "description": "Widget position: first in the guide"
+  },
+  "widgetWidth": {
+    "message": "Widget width, px",
+    "description": "Label of the widget width field"
+  },
+  "widgetWidthHint": {
+    "message": "The guide column keeps its own width; this only caps the widget.",
+    "description": "Hint of the widget width field"
+  },
+  "widgetShowCounts": {
+    "message": "Show new-video counters",
+    "description": "Toggle for row counter chips"
+  },
+  "widgetShowZero": {
+    "message": "Show zero counters",
+    "description": "Toggle for showing counters with value zero"
+  },
+  "widgetCompact": {
+    "message": "Compact rows",
+    "description": "Toggle for the compact widget row style"
+  },
+  "themeFollow": {
+    "message": "Follow YouTube theme",
+    "description": "Toggle for following the YouTube dark/light theme"
+  },
+  "themeFollowHint": {
+    "message": "Off pins the light palette for the widget and the panel.",
+    "description": "Hint of the theme follow toggle"
+  },
+  "themeAccent": {
+    "message": "Accent color",
+    "description": "Label of the accent color picker"
+  },
+  "dataExport": {
+    "message": "Export JSON",
+    "description": "Button that downloads all extension data"
+  },
+  "dataExported": {
+    "message": "Export started",
+    "description": "Status after starting a JSON export"
+  },
+  "dataImport": {
+    "message": "Import JSON",
+    "description": "File picker label for a JSON import"
+  },
+  "dataImportDone": {
+    "message": "Imported — reloading",
+    "description": "Status after a successful JSON import"
+  },
+  "dataImportFailed": {
+    "message": "Not a YouTube Aggregator export",
+    "description": "Status when the picked file is not ours"
+  },
+  "dataReset": {
+    "message": "Reset all data",
+    "description": "Button that deletes all extension data"
+  },
+  "dataResetConfirm": {
+    "message": "Delete all profiles, groups, settings and caches? YouTube subscriptions are not affected.",
+    "description": "Confirmation before wiping extension data"
   }
 }

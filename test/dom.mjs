@@ -1,7 +1,8 @@
-// Widget DOM harness (no browser, no deps): runs the real content scripts
-// (state.js, profiles.js, counters.js, widget.js) against a minimal DOM and
-// the real service worker from harness.mjs. Covers what logic.mjs cannot:
-// row painting, the contextmenu "mark as watched" entry and applyCounts.
+// Widget + config-panel DOM harness (no browser, no deps): runs the real
+// content and config scripts (state.js, profiles.js, counters.js, widget.js,
+// panel.js, panel-sections.js) against a minimal DOM and the real service
+// worker from harness.mjs. Covers what logic.mjs cannot: row painting, the
+// contextmenu "mark as watched" entry, applyCounts and the stage-4 panel.
 // Run: node test/dom.mjs — exit code 0 = all checks pass.
 import vm from "node:vm";
 import {
@@ -50,6 +51,7 @@ class Element {
     this.dataset = Object.create(null);
     this._text = "";
     this._listeners = Object.create(null);
+    this._styleVars = Object.create(null);
     this.className = "";
     this.parentNode = null;
     const self = this;
@@ -116,6 +118,26 @@ class Element {
     return node;
   }
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  // Config panel (stage 4) touches these: style vars, focus, in-place rebuild.
+  get style() {
+    if (!this._style) {
+      const self = this;
+      this._style = {
+        setProperty(k, v) { self._styleVars[k] = String(v); },
+        removeProperty(k) { delete self._styleVars[k]; }
+      };
+    }
+    return this._style;
+  }
+  get styleVars() { return this._styleVars; }
+  focus() { this._focused = true; }
+  scrollIntoView() {}
+  replaceWith(node) {
+    const p = this.parentNode;
+    if (!p) return;
+    p.insertBefore(node, this);
+    this.remove();
+  }
   contains(other) {
     let n = other;
     while (n) { if (n === this) return true; n = n.parentNode; }
@@ -175,6 +197,37 @@ function collect(node, sel, out) {
   }
 }
 
+// Real enough event plumbing for the panel: document-level keydown (capture)
+// and window-level yt-navigate-finish both need to be dispatchable.
+function makeTarget() {
+  const map = Object.create(null);
+  return {
+    addEventListener(type, fn) { (map[type] = map[type] || []).push(fn); },
+    removeEventListener(type, fn) {
+      const a = map[type] || [];
+      const i = a.indexOf(fn);
+      if (i >= 0) a.splice(i, 1);
+    },
+    fire(type, ev) {
+      const event = Object.assign(
+        {
+          type,
+          defaultPrevented: false,
+          preventDefault() { this.defaultPrevented = true; },
+          stopPropagation() { this.propagationStopped = true; },
+          stopImmediatePropagation() { this.propagationStopped = true; }
+        },
+        ev
+      );
+      for (const fn of (map[type] || []).slice()) fn(event);
+      return event;
+    }
+  };
+}
+
+const docEvents = makeTarget();
+const windowEvents = makeTarget();
+
 const document = {
   isRoot: true,
   createElement: (tag) => new Element(tag),
@@ -182,13 +235,24 @@ const document = {
   createTextNode: (t) => new TextNode(t),
   querySelector: (sel) => root.querySelector(sel),
   querySelectorAll: (sel) => root.querySelectorAll(sel),
-  addEventListener() {},
+  addEventListener: docEvents.addEventListener,
+  removeEventListener: docEvents.removeEventListener,
   readyState: "complete"
 };
 const root = new Element("#document");
 root.isRoot = true;
 root.parentNode = null;
 document.body = root;
+document.documentElement = new Element("html");
+document.documentElement._styleVars["--yt-spec-text-primary"] = "#0f0f0f";
+document.documentElement._styleVars["--yt-spec-text-secondary"] = "#aaaaaa";
+document.documentElement._styleVars["--yt-spec-general-background-a"] = "#ffffff";
+
+globalThis.getComputedStyle = (node) => ({
+  getPropertyValue: (name) => (node && node._styleVars ? node._styleVars[name] || "" : ""),
+  color: (node && node._computedColor) || "",
+  backgroundColor: (node && node._computedBg) || ""
+});
 
 class IntersectionObserver {
   constructor() {}
@@ -223,6 +287,8 @@ wlocal.set = async function (payload) {
 };
 
 globalThis.window = globalThis;
+globalThis.addEventListener = windowEvents.addEventListener;
+globalThis.removeEventListener = windowEvents.removeEventListener;
 globalThis.document = document;
 globalThis.IntersectionObserver = IntersectionObserver;
 globalThis.chrome = {
@@ -270,7 +336,16 @@ async function deliver() {
   }
 }
 
-for (const f of ["content/state.js", "content/profiles.js", "content/counters.js", "content/widget.js"]) {
+for (const f of [
+  "content/selectors.js",
+  "content/state.js",
+  "content/profiles.js",
+  "content/counters.js",
+  "content/theme.js",
+  "content/widget.js",
+  "config/panel.js",
+  "config/panel-sections.js"
+]) {
   vm.runInThisContext(read(f), { filename: f });
 }
 
@@ -350,9 +425,118 @@ env.sandbox.chrome.storage.local
       JSON.stringify(row2 && row2.querySelector(".yga-count").textContent)
     );
 
+    // --- stage 4: inline configuration panel (PLAN.md §8.7, §9.2) ---------
+    // A YouTube-shaped page so the panel gets a real ytd-app > #content anchor.
+    widget.remove();
+    const app = document.createElement("ytd-app");
+    const content = document.createElement("div");
+    content.setAttribute("id", "content");
+    const page = document.createElement("ytd-two-column-browse-results-renderer");
+    content.appendChild(page);
+    app.appendChild(content);
+    const guide = document.createElement("div");
+    guide.setAttribute("id", "guide-inner-content");
+    const sections = document.createElement("div");
+    sections.setAttribute("id", "sections");
+    const subLink = document.createElement("a");
+    subLink.setAttribute("href", "/feed/subscriptions");
+    sections.appendChild(subLink);
+    guide.appendChild(sections);
+    app.appendChild(guide);
+    root.appendChild(app);
+
+    const mounted = yga.mountWidget();
+    check(
+      "panel: widget mounted in the guide",
+      !!mounted && mounted.parentNode === guide,
+      JSON.stringify(mounted && mounted.parentNode && mounted.parentNode.id)
+    );
+
+    const gear = mounted && mounted.querySelector(".yga-config-btn");
+    check("panel: gear button present", !!gear);
+    check("panel: closed before the gear", !yga.panel.isOpen());
+    gear.dispatchEvent({ type: "click" });
+    await flush(40); // section builders are async
+
+    check("panel: gear opens the panel", yga.panel.isOpen());
+    const panel = content.querySelector('[data-yga="panel"]');
+    check("panel: panel is a child of #content", !!panel && panel.parentNode === content);
+    check("panel: YouTube page hidden behind it", page.classList.contains("yga-hidden"));
+    check(
+      "panel: page scroll locked",
+      document.documentElement.classList.contains("yga-scroll-lock") &&
+        root.classList.contains("yga-scroll-lock")
+    );
+    check(
+      "panel: seven sections built",
+      panel.querySelectorAll("[data-section]").length === 7,
+      String(panel.querySelectorAll("[data-section]").length)
+    );
+    check("panel: no section failed to load", panel.textContent.indexOf("panelSectionError") < 0);
+    check(
+      "panel: follows YouTube surface",
+      panel.styleVars["--yga-surface"] === "rgb(255, 255, 255)",
+      JSON.stringify(panel.styleVars["--yga-surface"])
+    );
+    check(
+      "panel: follows YouTube text",
+      panel.styleVars["--yga-fg"] === "rgb(15, 15, 15)",
+      JSON.stringify(panel.styleVars["--yga-fg"])
+    );
+    check(
+      "panel: dim text is contrast-adjusted",
+      !!panel.styleVars["--yga-fg-dim"] && panel.styleVars["--yga-fg-dim"] !== "rgb(170, 170, 170)",
+      JSON.stringify(panel.styleVars["--yga-fg-dim"])
+    );
+
+    // §11 stage-4 criterion: an edit lands live, no reload and no Save button.
+    await yga.profiles.saveSettingsPath("widget.widthPx", 360);
+    await yga.profiles.saveSettingsPath("widget.compact", true);
+    await flush(20);
+    check(
+      "panel: width edit applied live",
+      mounted.styleVars["--yga-width"] === "360px",
+      JSON.stringify(mounted.styleVars["--yga-width"])
+    );
+    check("panel: compact edit applied live", mounted.classList.contains("yga-compact"));
+    await yga.profiles.saveSettingsPath("widget.showCounts", false);
+    await flush(20);
+    check("panel: showCounts edit applied live", mounted.classList.contains("yga-no-counts"));
+
+    // Zero counters: hidden by default, shown the moment the box is ticked.
+    await yga.profiles.saveSettingsPath("widget.showCounts", true);
+    await yga.state.markVisited(p2.id, CH1);
+    await yga.state.refreshVisible();
+    await flush(20);
+    const row3 = mounted.querySelector('[data-yga-row="' + CH1 + '"]');
+    check(
+      "panel: zero counter hidden by default",
+      !!row3 && row3.querySelector(".yga-count").textContent === "",
+      JSON.stringify(row3 && row3.querySelector(".yga-count").textContent)
+    );
+    await yga.profiles.saveSettingsPath("widget.showZeroCount", true);
+    await flush(20);
+    check(
+      "panel: showZeroCount edit repaints live",
+      row3.querySelector(".yga-count").textContent === "0",
+      JSON.stringify(row3.querySelector(".yga-count").textContent)
+    );
+
+    // Esc closes the panel and hands the page back to YouTube (§8.7).
+    docEvents.fire("keydown", { key: "Escape" });
+    check("panel: Esc closes the panel", !yga.panel.isOpen());
+    check("panel: panel removed from #content", !content.querySelector('[data-yga="panel"]'));
+    check("panel: YouTube page restored", !page.classList.contains("yga-hidden"));
+    check(
+      "panel: scroll unlocked",
+      !document.documentElement.classList.contains("yga-scroll-lock") &&
+        !root.classList.contains("yga-scroll-lock")
+    );
+
     report();
   })
   .catch((e) => {
     failures.push("dom section crashed: " + e);
+    console.error("CRASH", e && e.stack ? e.stack : e);
     report();
   });

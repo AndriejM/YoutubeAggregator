@@ -493,6 +493,32 @@ function handleCounters(msg) {
         return { ok: true, lastVisitAt: rec.lastVisitAt };
       })();
 
+    // Bulk reset (config panel §9.2.1 "mark watched" on many channels): one
+    // composition write and one aggregate emit for the whole batch, otherwise
+    // a 200-channel selection floods the alarms bus.
+    case "counters:setVisits":
+      return (async () => {
+        const { profileId, channelIds } = msg;
+        if (!profileId || !Array.isArray(channelIds) || !channelIds.length) {
+          return { ok: false, error: "badArgs" };
+        }
+        const key = "yga:profile-channels:" + profileId;
+        const stored = await chrome.storage.local.get(key);
+        const comp = stored[key] || {};
+        const stamp = Number(msg.lastVisitAt) || now();
+        for (const channelId of channelIds) {
+          if (!channelId) continue;
+          const rec = comp[channelId] || { addedAt: now() };
+          rec.lastVisitAt = stamp;
+          comp[channelId] = rec;
+        }
+        const payload = {};
+        payload[key] = comp;
+        await chrome.storage.local.set(payload);
+        await emitProfileCounts(profileId, true);
+        return { ok: true, lastVisitAt: stamp, updated: channelIds.length };
+      })();
+
     case "counters:get":
       return (async () => {
         const ids = Array.isArray(msg.channelIds) ? msg.channelIds : [];

@@ -14,6 +14,14 @@ window.yga = window.yga || {};
   const profileListeners = new Set();
   const compositionMirrors = new Map(); // profileId -> last known comp object (cross-tab adopt)
 
+  // yga:settings mirror (stage 4). The panel writes single fields through
+  // saveSettingsPath; the widget subscribes through onSettingsChanged so every
+  // change lands without a page reload (PLAN.md §11 stage 4 criterion).
+  let settings = null;
+  const settingsListeners = new Set();
+  let settingsTimer = 0;
+  const SETTINGS_WRITE_DEBOUNCE_MS = 300; // §5 write-amplification guard
+
   // The single writer of yga:profile-channels:<id> (stage 3). state.js bridges
   // storage.onChanged from OTHER contexts into these mirrors (adopt), so reads
   // here never serve a stale composition after another tab edited it.
@@ -59,19 +67,79 @@ window.yga = window.yga || {};
   }
 
   async function loadSettings() {
+    if (settings) return settings;
     const stored = await chrome.storage.local.get(SETTINGS_KEY);
     const s = stored[SETTINGS_KEY];
-    return s && s.version === 1 ? s : defaults();
+    settings = s && s.version === 1 ? s : defaults();
+    return settings;
+  }
+
+  function cloneSettings(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  }
+
+  function emitSettings() {
+    const snapshot = settings || defaults();
+    for (const cb of settingsListeners) {
+      try {
+        cb(snapshot);
+      } catch (e) {
+        console.debug("[yga] settings listener failed:", e);
+      }
+    }
+  }
+
+  function flushSettingsWrite() {
+    settingsTimer = 0;
+    if (!settings) return;
+    const payload = {};
+    payload[SETTINGS_KEY] = settings;
+    chrome.storage.local.set(payload);
+  }
+
+  // Debounced write for inline edits; the mirror is already updated, so the
+  // widget repaints immediately while storage catches up (PLAN.md §5).
+  function scheduleSettingsWrite() {
+    if (settingsTimer) clearTimeout(settingsTimer);
+    settingsTimer = setTimeout(flushSettingsWrite, SETTINGS_WRITE_DEBOUNCE_MS);
   }
 
   async function saveSettings(patch) {
-    const settings = await loadSettings();
-    const merged = Object.assign({}, settings, patch);
+    const current = await loadSettings();
+    settings = Object.assign(cloneSettings(current), patch);
     const payload = {};
-    payload[SETTINGS_KEY] = merged;
+    payload[SETTINGS_KEY] = settings;
     await chrome.storage.local.set(payload);
-    return merged;
+    emitSettings();
+    return settings;
   }
+
+  // Write one nested field ("widget.widthPx", "refresh.scheduled.enabled").
+  async function saveSettingsPath(path, value) {
+    const next = cloneSettings(await loadSettings());
+    const parts = String(path).split(".");
+    let node = next;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (typeof node[parts[i]] !== "object" || node[parts[i]] === null) node[parts[i]] = {};
+      node = node[parts[i]];
+    }
+    node[parts[parts.length - 1]] = value;
+    settings = next;
+    scheduleSettingsWrite();
+    emitSettings();
+    return next;
+  }
+
+  // Cross-tab settings convergence: another tab's panel edit must reach this
+  // widget too. Equal payloads are skipped so our own write never re-renders.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[SETTINGS_KEY]) return;
+    const next = changes[SETTINGS_KEY].newValue;
+    if (!next || next.version !== 1) return;
+    if (settings && JSON.stringify(next) === JSON.stringify(settings)) return;
+    settings = next;
+    emitSettings();
+  });
 
   async function persistProfiles() {
     const payload = {};
@@ -125,6 +193,20 @@ window.yga = window.yga || {};
 
     async getSettings() {
       return loadSettings();
+    },
+
+    // Inline edit of one nested field (config panel, stage 4).
+    async saveSettingsPath(path, value) {
+      return saveSettingsPath(path, value);
+    },
+
+    defaults() {
+      return defaults();
+    },
+
+    onSettingsChanged(cb) {
+      settingsListeners.add(cb);
+      return () => settingsListeners.delete(cb);
     },
 
     async activeProfileId() {
@@ -267,8 +349,43 @@ window.yga = window.yga || {};
       return true;
     },
 
+    // Bulk membership for the config panel (§9.2.1): one read and one write
+    // per selection, never one storage write per channel.
+    async addChannels(profileId, channelIds) {
+      const profile = this.get(profileId);
+      if (!profile || !Array.isArray(channelIds) || !channelIds.length) return 0;
+      const comp = await readComposition(profileId);
+      let changed = 0;
+      for (const channelId of channelIds) {
+        if (!channelId || (comp[channelId] && isMember(comp[channelId]))) continue;
+        comp[channelId] = Object.assign(entry(), comp[channelId] || {});
+        delete comp[channelId].unsubscribed;
+        delete comp[channelId].excluded;
+        changed++;
+      }
+      if (changed) await writeComposition(profileId, comp);
+      return changed;
+    },
+
+    async removeChannels(profileId, channelIds) {
+      const profile = this.get(profileId);
+      if (!profile || !Array.isArray(channelIds) || !channelIds.length) return 0;
+      const comp = await readComposition(profileId);
+      const stamp = now();
+      let changed = 0;
+      for (const channelId of channelIds) {
+        if (!channelId || !comp[channelId] || comp[channelId].excluded) continue;
+        comp[channelId].excluded = true;
+        comp[channelId].lastVisitAt = stamp;
+        changed++;
+      }
+      if (changed) await writeComposition(profileId, comp);
+      return changed;
+    },
+
     async removeChannel(profileId, channelId) {
       const profile = this.get(profileId);
+
       if (!profile || !channelId) return false;
       const comp = await readComposition(profileId);
       if (!comp[channelId]) comp[channelId] = entry();

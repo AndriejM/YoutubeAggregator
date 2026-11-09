@@ -20,6 +20,15 @@ window.yga = window.yga || {};
       '#guide-inner-content a[href="/feed/subscriptions"]',
       '#guide-inner-content a[href^="/feed/subscriptions"]',
       '#sections a[href*="/feed/subscriptions"]'
+    ],
+    // Config panel anchors (PLAN.md §8.7): the panel is a sibling of the
+    // YouTube page inside ytd-app > #content, so the guide stays visible.
+    contentRoot: ["ytd-app > #content", "ytd-app #content", "#content"],
+    browseResults: [
+      "ytd-two-column-browse-results-renderer",
+      "ytd-browse",
+      "#page-manager",
+      "ytd-page-manager"
     ]
   };
 

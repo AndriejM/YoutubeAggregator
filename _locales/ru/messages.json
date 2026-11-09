@@ -114,5 +114,237 @@
   "newVideos": {
     "message": "Новых видео: {count}",
     "description": "Подсказка чипа-счётчика канала"
+  },
+  "panelTitle": {
+    "message": "Конфигурация",
+    "description": "Заголовок инлайн-панели конфигурации"
+  },
+  "panelClose": {
+    "message": "Закрыть",
+    "description": "Aria-метка кнопки закрытия панели"
+  },
+  "panelSectionError": {
+    "message": "Раздел не загрузился",
+    "description": "Заглушка раздела панели с исключением"
+  },
+  "sectionProfiles": {
+    "message": "Профили",
+    "description": "Раздел панели: профили"
+  },
+  "sectionGroups": {
+    "message": "Группы",
+    "description": "Раздел панели: группы каналов"
+  },
+  "sectionChannels": {
+    "message": "Каналы",
+    "description": "Раздел панели: список каналов активного профиля"
+  },
+  "sectionCounters": {
+    "message": "Счётчики",
+    "description": "Раздел панели: настройки счётчиков"
+  },
+  "sectionWidget": {
+    "message": "Виджет",
+    "description": "Раздел панели: настройки виджета"
+  },
+  "sectionTheme": {
+    "message": "Тема",
+    "description": "Раздел панели: настройки темы"
+  },
+  "sectionData": {
+    "message": "Данные",
+    "description": "Раздел панели: экспорт, импорт, сброс"
+  },
+  "accountLabel": {
+    "message": "Аккаунт YouTube",
+    "description": "Подпись ключа аккаунта в разделе профилей"
+  },
+  "accountUnknown": {
+    "message": "Аккаунт не определён",
+    "description": "Подпись аккаунта до завершения определения"
+  },
+  "profileActive": {
+    "message": "Активный профиль",
+    "description": "Aria-метка переключателя активного профиля"
+  },
+  "groupsSoon": {
+    "message": "Группы каналов появятся на этапе 5.",
+    "description": "Заглушка раздела групп до этапа 5"
+  },
+  "channelsSearch": {
+    "message": "Поиск каналов",
+    "description": "Плейсхолдер поля поиска списка каналов"
+  },
+  "channelsSortTitle": {
+    "message": "Название",
+    "description": "Опция сортировки списка: по названию"
+  },
+  "channelsSortCount": {
+    "message": "Новые видео",
+    "description": "Опция сортировки списка: по счётчику новых видео"
+  },
+  "channelsShowAll": {
+    "message": "Показать все подписки",
+    "description": "Переключатель показа всего каталога, а не только каналов профиля"
+  },
+  "channelsSelectAll": {
+    "message": "Выделить все",
+    "description": "Массовая операция: выбрать весь список"
+  },
+  "channelsSelectNone": {
+    "message": "Снять выделение",
+    "description": "Массовая операция: очистить выделение"
+  },
+  "channelsSelected": {
+    "message": "Выбрано: {count}",
+    "description": "Счётчик рядом с массовыми операциями"
+  },
+  "channelsAdd": {
+    "message": "Добавить",
+    "description": "Добавить канал в активный профиль"
+  },
+  "channelsRemove": {
+    "message": "Убрать",
+    "description": "Убрать канал из активного профиля"
+  },
+  "channelsMarkWatched": {
+    "message": "Просмотрено",
+    "description": "Массовая операция: обнулить счётчики выделения"
+  },
+  "channelsMore": {
+    "message": "Подходит каналов: {count} — уточните поиск",
+    "description": "Подсказка при обрезке списка каналов"
+  },
+  "groupNone": {
+    "message": "Без группы",
+    "description": "Чип группы у канала без группы"
+  },
+  "resetCounter": {
+    "message": "Сброс",
+    "description": "Обнулить счётчик новых видео канала"
+  },
+  "refreshMode": {
+    "message": "Режим обновления",
+    "description": "Метка переключателя режима обновления счётчиков"
+  },
+  "refreshModeHint": {
+    "message": "«При открытии» опрашивает только при открытии виджета; «по расписанию» — ещё и в фоне.",
+    "description": "Подсказка переключателя режима обновления счётчиков"
+  },
+  "refreshOnOpen": {
+    "message": "При открытии",
+    "description": "Режим обновления: только при открытии виджета"
+  },
+  "refreshScheduled": {
+    "message": "По расписанию",
+    "description": "Режим обновления: фоновый опрос"
+  },
+  "scheduledEnabled": {
+    "message": "Включить обновление по расписанию",
+    "description": "Переключатель фонового опроса счётчиков"
+  },
+  "scheduledEnabledHint": {
+    "message": "Фоновый опрос RSS через alarms. По умолчанию выключен.",
+    "description": "Подсказка переключателя обновления по расписанию"
+  },
+  "scheduledPeriod": {
+    "message": "Период, минут",
+    "description": "Метка периода обновления по расписанию"
+  },
+  "scheduledPeriodHint": {
+    "message": "Минимум 60 минут.",
+    "description": "Подсказка периода обновления по расписанию"
+  },
+  "scheduledMaxChannels": {
+    "message": "Максимум каналов за прогон",
+    "description": "Метка ограничения числа каналов за прогон"
+  },
+  "refreshBatch": {
+    "message": "Размер пачки",
+    "description": "Метка размера пачки RSS-запросов"
+  },
+  "refreshMinInterval": {
+    "message": "Мин. интервал, секунд",
+    "description": "Метка минимального интервала обновления канала"
+  },
+  "refreshMinIntervalHint": {
+    "message": "Канал не опрашивается чаще этого интервала.",
+    "description": "Подсказка минимального интервала обновления канала"
+  },
+  "widgetPosition": {
+    "message": "Позиция виджета",
+    "description": "Метка переключателя позиции виджета"
+  },
+  "widgetPositionHint": {
+    "message": "Куда виджет вставляется в гайде.",
+    "description": "Подсказка переключателя позиции виджета"
+  },
+  "widgetPositionGuide": {
+    "message": "После «Подписки»",
+    "description": "Позиция виджета: под ссылкой подписок"
+  },
+  "widgetPositionTop": {
+    "message": "В начале гайда",
+    "description": "Позиция виджета: первым в гайде"
+  },
+  "widgetWidth": {
+    "message": "Ширина виджета, px",
+    "description": "Метка поля ширины виджета"
+  },
+  "widgetWidthHint": {
+    "message": "Колонка гайда остаётся своей ширины; это ограничивает только виджет.",
+    "description": "Подсказка поля ширины виджета"
+  },
+  "widgetShowCounts": {
+    "message": "Показывать счётчики",
+    "description": "Переключатель чипов-счётчиков в строках"
+  },
+  "widgetShowZero": {
+    "message": "Показывать нули",
+    "description": "Переключатель показа счётчиков со значением ноль"
+  },
+  "widgetCompact": {
+    "message": "Компактные строки",
+    "description": "Переключатель компактного стиля строк виджета"
+  },
+  "themeFollow": {
+    "message": "Следовать теме YouTube",
+    "description": "Переключатель следования тёмной/светлой теме YouTube"
+  },
+  "themeFollowHint": {
+    "message": "Если выключено — светлая палитра для виджета и панели.",
+    "description": "Подсказка переключателя следования теме"
+  },
+  "themeAccent": {
+    "message": "Акцентный цвет",
+    "description": "Метка выбора акцентного цвета"
+  },
+  "dataExport": {
+    "message": "Экспорт JSON",
+    "description": "Кнопка скачивания всех данных расширения"
+  },
+  "dataExported": {
+    "message": "Экспорт начат",
+    "description": "Статус после запуска экспорта JSON"
+  },
+  "dataImport": {
+    "message": "Импорт JSON",
+    "description": "Метка выбора файла импорта JSON"
+  },
+  "dataImportDone": {
+    "message": "Импортировано — перезагрузка",
+    "description": "Статус после успешного импорта JSON"
+  },
+  "dataImportFailed": {
+    "message": "Это не экспорт YouTube Aggregator",
+    "description": "Статус, когда выбранный файл не наш"
+  },
+  "dataReset": {
+    "message": "Сбросить все данные",
+    "description": "Кнопка удаления всех данных расширения"
+  },
+  "dataResetConfirm": {
+    "message": "Удалить все профили, группы, настройки и кэши? Подписки YouTube не пострадают.",
+    "description": "Подтверждение перед стиранием данных расширения"
   }
 }

@@ -321,3 +321,41 @@
   width: 100%;
   overflow-x: hidden;
 }
+
+/* widget.widthPx (PLAN.md §8.6) — the guide column keeps its own width */
+.yga-widget {
+  max-width: var(--yga-width, 300px);
+}
+
+/* widget.compact (§9): tighter rows, smaller avatars */
+.yga-widget.yga-compact .yga-row {
+  padding-top: 1px;
+  padding-bottom: 1px;
+  gap: 6px;
+}
+
+.yga-widget.yga-compact .yga-avatar {
+  width: 20px;
+  height: 20px;
+}
+
+.yga-widget.yga-compact .yga-widget-title,
+.yga-widget.yga-compact .yga-header,
+.yga-widget.yga-compact .yga-toolbar {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* widget.showCounts: false — hide the chips, keep the layout stable */
+.yga-widget.yga-no-counts .yga-count {
+  display: none;
+}
+
+/* theme.followYouTube: false — pin the light palette over html[dark] (§2) */
+.yga-widget.yga-force-light {
+  --yga-fg: #0f0f0f;
+  --yga-fg-dim: #606060;
+  --yga-hover: rgba(0, 0, 0, 0.05);
+  --yga-border: rgba(0, 0, 0, 0.15);
+  color: #0f0f0f;
+}
