@@ -340,6 +340,7 @@ for (const f of [
   "content/selectors.js",
   "content/state.js",
   "content/profiles.js",
+  "content/groups.js",
   "content/counters.js",
   "content/theme.js",
   "content/widget.js",
@@ -468,9 +469,11 @@ env.sandbox.chrome.storage.local
         root.classList.contains("yga-scroll-lock")
     );
     check(
-      "panel: seven sections built",
-      panel.querySelectorAll("[data-section]").length === 7,
-      String(panel.querySelectorAll("[data-section]").length)
+      "panel: seven tabs, one section built (§9.2.3)",
+      panel.querySelectorAll(".yga-panel-tab").length === 7 &&
+        panel.querySelectorAll("[data-section]").length === 1,
+      panel.querySelectorAll(".yga-panel-tab").length + "/" +
+        panel.querySelectorAll("[data-section]").length
     );
     check("panel: no section failed to load", panel.textContent.indexOf("panelSectionError") < 0);
     check(
@@ -531,6 +534,102 @@ env.sandbox.chrome.storage.local
       "panel: scroll unlocked",
       !document.documentElement.classList.contains("yga-scroll-lock") &&
         !root.classList.contains("yga-scroll-lock")
+    );
+
+    // --- stage 5: group tree (PLAN.md §18) --------------------------------
+    // A fresh profile: the stage-4 checks above marked CH1 watched in p2.
+    const p3 = await yga.profiles.create("Groups");
+    await yga.profiles.addChannel(p3.id, CH1);
+    await yga.profiles.setActiveProfile(p3.id);
+    await yga.state.refreshVisible();
+    await flush(20);
+
+    const group = await yga.groups.create("News", p3.id);
+    check("groups: created inside the active profile (§18.1)", !!group && group.profileId === p3.id);
+    await yga.profiles.setGroup(p3.id, [CH1], group.id);
+    await yga.state.refreshVisible();
+    await flush(20);
+
+    // Renders target the mounted widget (document.querySelector), not the
+    // stage-3 fixture widget.
+    const groupRow = mounted.querySelector(".yga-group");
+    const gname = groupRow && groupRow.querySelector(".yga-group-name");
+    const gchip = groupRow && groupRow.querySelector(".yga-group-count");
+    check("tree: group row rendered (§18.3)", !!groupRow);
+    check(
+      "tree: group name shown",
+      !!gname && gname.textContent === "News",
+      JSON.stringify(gname && gname.textContent)
+    );
+    check(
+      "tree: channel indented under its group",
+      !!mounted.querySelector('.yga-group-channels [data-yga-row="' + CH1 + '"]')
+    );
+    check(
+      "tree: group counter is the plain sum, not the 15+ ceiling (§18.4)",
+      !!gchip && gchip.textContent === "16",
+      JSON.stringify(gchip && gchip.textContent)
+    );
+
+    groupRow.dispatchEvent({ type: "click" });
+    await flush(40);
+    check(
+      "tree: collapsed group keeps its channels out of the DOM (§9)",
+      !mounted.querySelector('[data-yga-row="' + CH1 + '"]')
+    );
+    const persisted = await chrome.storage.local.get("yga:groups");
+    check(
+      "tree: collapsed persisted to yga:groups (§5)",
+      !!(persisted["yga:groups"] || []).find((g) => g.id === group.id && g.collapsed)
+    );
+
+    mounted.querySelector(".yga-group").dispatchEvent({ type: "click" });
+    await flush(40);
+    check(
+      "tree: expanding brings the channels back",
+      !!mounted.querySelector('[data-yga-row="' + CH1 + '"]')
+    );
+
+    yga.panel.open("groups");
+    await flush(40);
+    const gsection = content.querySelector('[data-section="groups"]');
+    check("panel: groups tab built (§9.2.2)", !!gsection);
+    check(
+      "panel: group row carries the n/m counter (§18.5)",
+      !!gsection && gsection.textContent.indexOf("1/1") >= 0,
+      JSON.stringify(gsection && gsection.textContent)
+    );
+
+    gsection.querySelector(".yga-panel-primary").dispatchEvent({ type: "click" });
+    await flush(10);
+    const modal = content.querySelector(".yga-panel-modal");
+    check(
+      "panel: «+ Группа» is a modal with one name field (§9.2.2)",
+      !!modal && modal.querySelectorAll(".yga-panel-input").length === 1
+    );
+    modal.querySelector(".yga-panel-input").value = "Music";
+    modal.querySelector(".yga-panel-primary").dispatchEvent({ type: "click" });
+    await flush(40);
+    check(
+      "panel: modal created the group",
+      !!yga.groups.list(p3.id).find((g) => g.name === "Music")
+    );
+
+    globalThis.confirm = () => true;
+    content
+      .querySelector('[data-section="groups"] .yga-panel-danger')
+      .dispatchEvent({ type: "click" });
+    await flush(60);
+    check(
+      "groups: deleting moves its channels back to «Без группы» (§18.1)",
+      (await yga.profiles.getComposition(p3.id))[CH1].groupId === null
+    );
+    const pseudo = mounted.querySelector('[data-yga-group="none"]');
+    check(
+      "tree: pseudo-group renders with its channels (§18.2)",
+      !!pseudo &&
+        pseudo.querySelector(".yga-group-name").textContent === "groupNone" &&
+        !!pseudo.querySelector('[data-yga-row="' + CH1 + '"]')
     );
 
     report();

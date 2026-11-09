@@ -167,9 +167,53 @@
     "message": "Active profile",
     "description": "Aria label of the profile active radio"
   },
-  "groupsSoon": {
-    "message": "Channel groups arrive with stage 5.",
-    "description": "Placeholder of the groups section before stage 5"
+  "groupNew": {
+    "message": "New group",
+    "description": "Button and modal title: create a channel group"
+  },
+  "groupNameRequired": {
+    "message": "Enter a group name",
+    "description": "Validation hint when the group name field is empty"
+  },
+  "groupRename": {
+    "message": "Rename",
+    "description": "Button: rename a group"
+  },
+  "groupDelete": {
+    "message": "Delete",
+    "description": "Button: delete a group"
+  },
+  "groupDeleteConfirm": {
+    "message": "Delete this group? {count} of its channels will move to “No group”.",
+    "description": "Confirm dialog before deleting a group"
+  },
+  "groupUp": {
+    "message": "Up",
+    "description": "Button: move a group up in the widget order"
+  },
+  "groupDown": {
+    "message": "Down",
+    "description": "Button: move a group down in the widget order"
+  },
+  "groupsEmpty": {
+    "message": "No groups yet. Create one to split the widget into a tree.",
+    "description": "Placeholder of the groups section when the profile has none"
+  },
+  "groupsHint": {
+    "message": "Groups belong to the active profile; the same channel can sit in different groups of different profiles.",
+    "description": "Hint under the group list"
+  },
+  "groupTotal": {
+    "message": "{count} new",
+    "description": "Aria label of a group counter chip"
+  },
+  "groupButton": {
+    "message": "Group",
+    "description": "Button in the header of a channel page"
+  },
+  "groupCreateAssign": {
+    "message": "Create and assign",
+    "description": "Button: create a group from the channel page and assign it"
   },
   "channelsSearch": {
     "message": "Search channels",
@@ -182,6 +226,18 @@
   "channelsSortCount": {
     "message": "New videos",
     "description": "Channel list sort option: by new-video counter"
+  },
+  "channelsSortGroup": {
+    "message": "Group",
+    "description": "Channel list sort option: by group, no group last"
+  },
+  "channelsGroupAll": {
+    "message": "All groups",
+    "description": "Group filter chip showing every channel"
+  },
+  "channelsGroupApply": {
+    "message": "Move",
+    "description": "Button: move selected channels to the chosen group"
   },
   "channelsShowAll": {
     "message": "Show all subscriptions",
@@ -306,6 +362,58 @@
   "widgetCompact": {
     "message": "Compact rows",
     "description": "Toggle for the compact widget row style"
+  },
+  "widgetHideEmptyGroups": {
+    "message": "Hide empty groups",
+    "description": "Toggle: groups without channels stay out of the widget"
+  },
+  "widgetHideEmptyGroupsHint": {
+    "message": "A group with no channels is hidden; its name stays in the settings.",
+    "description": "Hint for the hide-empty-groups toggle"
+  },
+  "widgetChannelPageButton": {
+    "message": "“Group” button on channel pages",
+    "description": "Toggle: show the group button in a channel page header"
+  },
+  "widgetChannelPageButtonHint": {
+    "message": "Assigns the channel you are watching to a group of the active profile.",
+    "description": "Hint for the channel page group button toggle"
+  },
+  "profileSort": {
+    "message": "Channel order",
+    "description": "Select: sort order of channels inside widget groups"
+  },
+  "profileSortHint": {
+    "message": "Groups stay the top level of the widget; this order applies inside each group.",
+    "description": "Hint for the channel order select"
+  },
+  "profileSortActivity": {
+    "message": "Most recent first",
+    "description": "Profile sort option: counter desc, then name"
+  },
+  "profileSortAlpha": {
+    "message": "A–Z",
+    "description": "Profile sort option: by channel name"
+  },
+  "profileSortSubs": {
+    "message": "Subscription order",
+    "description": "Profile sort option: the order YouTube lists subscriptions in"
+  },
+  "profileSortManual": {
+    "message": "Manual",
+    "description": "Profile sort option: user-defined order (not editable yet)"
+  },
+  "profileSortGroups": {
+    "message": "By group",
+    "description": "Profile sort option: groups first, channels by counter"
+  },
+  "modalOk": {
+    "message": "OK",
+    "description": "Confirm button of a panel dialog"
+  },
+  "modalCancel": {
+    "message": "Cancel",
+    "description": "Cancel button of a panel dialog"
   },
   "themeFollow": {
     "message": "Follow YouTube theme",

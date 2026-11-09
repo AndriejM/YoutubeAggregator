@@ -25,8 +25,9 @@ window.yga = window.yga || {};
 
   const ROW_LIMIT = 300; // 995-channel catalogs must not freeze the panel
   const SEARCH_DEBOUNCE_MS = 150; // §9.2.1
-  const GROUPS_KEY = "yga:groups";
   const ACCOUNT_KEY = "yga:account";
+  const NO_GROUP = "\u0000none"; // filter value for «Без группы»
+  const UNGROUPED_LAST = "\uffff"; // sorts after every real group name
 
   function isMember(rec) {
     return !!rec && !rec.unsubscribed && !rec.excluded;
@@ -76,6 +77,7 @@ window.yga = window.yga || {};
 
   BUILDERS.profiles = async function profiles(host) {
     const settings = await yga.profiles.getSettings();
+    await yga.profiles.load();
     const stored = await chrome.storage.local.get(ACCOUNT_KEY);
     const acc = stored[ACCOUNT_KEY] || {};
 
@@ -157,24 +159,121 @@ window.yga = window.yga || {};
     host.appendChild(add);
   };
 
-  // ---- Группы (§9.2.2): модель yga:groups и CRUD — этап 5 (§18) ----
+  // ---- Группы (§9.2.2): CRUD над yga:groups — этап 5 (§18) ----
+
+  function countInGroup(comp, groupId) {
+    let n = 0;
+    for (const id in comp) {
+      const rec = comp[id];
+      if (!isMember(rec)) continue;
+      if ((rec.groupId || null) === (groupId || null)) n++;
+    }
+    return n;
+  }
 
   BUILDERS.groups = async function groups(host) {
-    const stored = await chrome.storage.local.get(GROUPS_KEY);
-    const groups = stored[GROUPS_KEY];
-    if (!Array.isArray(groups) || !groups.length) {
-      host.appendChild(u.placeholder("groupsSoon"));
+    const profileId = await yga.profiles.activeProfileId();
+    await yga.groups.load();
+    const groups = yga.groups.list(profileId);
+    const comp = await yga.profiles.getComposition(profileId);
+    const total = countMembers(comp);
+
+    const status = el("span", "yga-panel-meta");
+    const bar = el("div", "yga-panel-bar");
+    const add = u.button("groupNew", "yga-panel-primary");
+    add.addEventListener("click", () => {
+      u.modal({
+        titleKey: "groupNew",
+        value: "",
+        onConfirm: async (raw) => {
+          const name = String(raw || "").trim();
+          if (!name) {
+            status.textContent = yga.i18n("groupNameRequired");
+            return;
+          }
+          await yga.groups.create(name, profileId);
+          await yga.state.refreshVisible();
+          yga.panel.refresh("groups");
+        }
+      });
+    });
+    bar.appendChild(add);
+    bar.appendChild(status);
+    host.appendChild(bar);
+
+    if (!groups.length) {
+      host.appendChild(u.placeholder("groupsEmpty"));
       return;
     }
+
     const list = el("div", "yga-panel-rows");
-    for (const g of groups) {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
       const row = el("div", "yga-panel-row");
-      const title = el("span", "yga-panel-title");
-      title.textContent = g.name;
-      row.appendChild(title);
+
+      const name = el("span", "yga-panel-title");
+      name.textContent = g.name;
+      name.title = g.name;
+
+      // §9.2.2: «n/m» — channels of this group over all channels of the profile.
+      const count = el("span", "yga-panel-meta");
+      count.textContent = countInGroup(comp, g.id) + "/" + total;
+
+      const up = u.button("groupUp", "yga-panel-icon");
+      up.disabled = i === 0;
+      up.addEventListener("click", async () => {
+        await yga.groups.move(g.id, -1);
+        await yga.state.refreshVisible();
+        yga.panel.refresh("groups");
+      });
+      const down = u.button("groupDown", "yga-panel-icon");
+      down.disabled = i === groups.length - 1;
+      down.addEventListener("click", async () => {
+        await yga.groups.move(g.id, 1);
+        await yga.state.refreshVisible();
+        yga.panel.refresh("groups");
+      });
+
+      const rename = u.button("groupRename", "yga-panel-icon");
+      rename.addEventListener("click", () => {
+        u.modal({
+          titleKey: "groupRename",
+          value: g.name,
+          onConfirm: async (raw) => {
+            const next = String(raw || "").trim();
+            if (!next || next === g.name) return;
+            await yga.groups.rename(g.id, next);
+            await yga.state.refreshVisible();
+            yga.panel.refresh("groups");
+            yga.panel.refresh("channels");
+          }
+        });
+      });
+
+      const del = u.button("groupDelete", "yga-panel-icon yga-panel-danger");
+      del.addEventListener("click", async () => {
+        const n = countInGroup(comp, g.id);
+        const text = yga.i18n("groupDeleteConfirm").replace("{count}", String(n));
+        if (!window.confirm(text)) return;
+        await yga.groups.remove(g.id); // its channels go back to «Без группы» (§18.1)
+        await yga.state.refreshVisible();
+        yga.panel.refresh("groups");
+        yga.panel.refresh("channels");
+      });
+
+      row.appendChild(name);
+      row.appendChild(count);
+      row.appendChild(up);
+      row.appendChild(down);
+      row.appendChild(rename);
+      row.appendChild(del);
       list.appendChild(row);
     }
     host.appendChild(list);
+
+    const hint = el("div", "yga-panel-hint");
+    hint.textContent = yga.i18n("groupsHint");
+    host.appendChild(hint);
   };
 
   // ---- Список каналов (§9.2.1) ----
@@ -187,6 +286,7 @@ window.yga = window.yga || {};
         profileId: profileId,
         filter: "",
         sort: "title",
+        group: "",
         showAll: false,
         selected: new Set(),
         timer: 0
@@ -200,7 +300,16 @@ window.yga = window.yga || {};
     const profile = yga.profiles.get(profileId);
     const st = channelsStateFor(profileId);
     const observer = lazyAvatars(host);
+    await yga.groups.load();
+    const groups = yga.groups.list(profileId);
+    const groupNames = new Map(groups.map((g) => [g.id, g.name]));
     let lastRows = [];
+
+    // §9.2.1: a channel of a deleted group shows «Без группы», never a stale name.
+    function groupText(rec) {
+      const gid = rec && rec.groupId;
+      return gid ? groupNames.get(gid) || "" : "";
+    }
 
     const rows = el("div", "yga-panel-rows yga-panel-scroll");
 
@@ -215,7 +324,7 @@ window.yga = window.yga || {};
 
     function updateBulk() {
       const n = st.selected.size;
-      for (const btn of [bulkAdd, bulkRemove, bulkWatched]) btn.disabled = !n;
+      for (const btn of [bulkAdd, bulkRemove, bulkWatched, bulkGroup]) btn.disabled = !n;
       selectedLabel.textContent = yga
         .i18n("channelsSelected")
         .replace("{count}", String(n));
@@ -231,18 +340,33 @@ window.yga = window.yga || {};
       const needle = st.filter.trim().toLowerCase();
       let list = catalog.filter((sub) => st.showAll || isMember(comp[sub.channelId]));
       if (needle) list = list.filter((sub) => (sub.title || "").toLowerCase().indexOf(needle) >= 0);
+      if (st.group) {
+        list = list.filter((sub) => {
+          const gid = (comp[sub.channelId] || {}).groupId || null;
+          return st.group === NO_GROUP ? !groupText(comp[sub.channelId]) : gid === st.group;
+        });
+      }
       list = list.slice().sort((a, b) => {
         if (st.sort === "count") {
           const na = newCountFor(yga.state.countOf(a.channelId), (comp[a.channelId] || {}).lastVisitAt);
           const nb = newCountFor(yga.state.countOf(b.channelId), (comp[b.channelId] || {}).lastVisitAt);
           if (nb !== na) return nb - na;
         }
+        if (st.sort === "group") {
+          // §9.2.1: groups first in locale order, «Без группы» last.
+          const ga = groupText(comp[a.channelId]) || UNGROUPED_LAST;
+          const gb = groupText(comp[b.channelId]) || UNGROUPED_LAST;
+          const byGroup = ga.localeCompare(gb, undefined, { sensitivity: "base" });
+          if (byGroup) return byGroup;
+        }
         return (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
       });
 
       lastRows = list.slice(0, ROW_LIMIT);
       const frag = document.createDocumentFragment();
-      for (const sub of lastRows) frag.appendChild(channelRow(sub, comp[sub.channelId], observer, st));
+      for (const sub of lastRows) {
+        frag.appendChild(channelRow(sub, comp[sub.channelId], observer, st, groups));
+      }
       rows.textContent = "";
       if (!lastRows.length) {
         const curated = profile && !profile.includeAllSubs && !st.showAll;
@@ -251,7 +375,30 @@ window.yga = window.yga || {};
         rows.appendChild(frag);
       }
       if (list.length > lastRows.length) rows.appendChild(hint("channelsMore", list.length));
+      renderChips(comp);
       updateBulk();
+    }
+
+    // Filter chips with n/m counters (§9.2.1, §18.5) — rebuilt with every fill
+    // because their counts follow the composition.
+    const chips = el("div", "yga-panel-chips");
+
+    function renderChips(comp) {
+      chips.textContent = "";
+      const total = countMembers(comp);
+      const mk = (value, label, n) => {
+        const chip = el("button", "yga-panel-chip", { type: "button" });
+        chip.textContent = n == null ? label : label + " " + n + "/" + total;
+        if (st.group === value) chip.classList.add("yga-active");
+        chip.addEventListener("click", () => {
+          st.group = value;
+          fill();
+        });
+        chips.appendChild(chip);
+      };
+      mk("", yga.i18n("channelsGroupAll"), null);
+      for (const g of groups) mk(g.id, g.name, countInGroup(comp, g.id));
+      mk(NO_GROUP, yga.i18n("groupNone"), countInGroup(comp, null));
     }
 
     const bar = el("div", "yga-panel-bar");
@@ -271,7 +418,8 @@ window.yga = window.yga || {};
     const sortSel = u.select(
       [
         { value: "title", labelKey: "channelsSortTitle" },
-        { value: "count", labelKey: "channelsSortCount" }
+        { value: "count", labelKey: "channelsSortCount" },
+        { value: "group", labelKey: "channelsSortGroup" }
       ],
       st.sort
     );
@@ -321,21 +469,39 @@ window.yga = window.yga || {};
       await yga.state.markVisitedBatch(profileId, selectedIds());
       fill();
     });
+
+    // Bulk group assignment (§9.2.1): one composition write for the selection.
+    const groupPick = u.select(
+      [{ value: "", labelKey: "groupNone" }].concat(groups.map((g) => ({ value: g.id, text: g.name }))),
+      ""
+    );
+    const bulkGroup = u.button("channelsGroupApply", "yga-panel-icon");
+    bulkGroup.disabled = true;
+    bulkGroup.addEventListener("click", async () => {
+      await yga.profiles.setGroup(profileId, selectedIds(), groupPick.value || null);
+      await yga.state.refreshVisible();
+      yga.panel.refresh("groups");
+      fill();
+    });
+
     bulk.appendChild(selectAll);
     bulk.appendChild(selectNone);
     bulk.appendChild(bulkAdd);
     bulk.appendChild(bulkRemove);
     bulk.appendChild(bulkWatched);
+    bulk.appendChild(groupPick);
+    bulk.appendChild(bulkGroup);
     bulk.appendChild(selectedLabel);
 
     host.appendChild(bar);
+    host.appendChild(chips);
     host.appendChild(bulk);
     host.appendChild(rows);
     updateBulk();
     await fill();
   };
 
-  function channelRow(sub, rec, observer, st) {
+  function channelRow(sub, rec, observer, st, groups) {
     const member = isMember(rec);
     const row = el("div", "yga-panel-row yga-panel-channel");
 
@@ -364,8 +530,29 @@ window.yga = window.yga || {};
     const count = el("span", "yga-panel-meta yga-panel-count");
     count.textContent = fresh && fresh.error ? "?" : chipText(n);
 
-    const group = el("span", "yga-panel-meta yga-panel-group");
-    group.textContent = yga.i18n("groupNone"); // group chips land in stage 5 (§18)
+    // §18.5: assignment is a native <select> chip in the row; «Без группы» is
+    // the empty value, so an ungrouped channel shows it instead of a group chip.
+    const group = el("select", "yga-panel-select yga-panel-group", {
+      "aria-label": yga.i18n("channelsGroupApply")
+    });
+    const known = new Set(groups.map((g) => g.id));
+    const current = rec && rec.groupId && known.has(rec.groupId) ? rec.groupId : "";
+    const opts = [{ value: "", text: yga.i18n("groupNone") }].concat(
+      groups.map((g) => ({ value: g.id, text: g.name }))
+    );
+    for (const opt of opts) {
+      const option = el("option", null, { value: opt.value });
+      option.textContent = opt.text;
+      group.appendChild(option);
+    }
+    group.value = current;
+    group.classList.toggle("yga-panel-group-none", !current);
+    group.addEventListener("change", async () => {
+      await yga.profiles.setGroup(st.profileId, [sub.channelId], group.value || null);
+      await yga.state.refreshVisible();
+      yga.panel.refresh("groups");
+      yga.panel.refresh("channels");
+    });
 
     const reset = u.button("resetCounter", "yga-panel-icon");
     reset.disabled = !n;
@@ -509,6 +696,41 @@ window.yga = window.yga || {};
       await u.save("widget.compact", compact.checked);
     });
     host.appendChild(u.field("widgetCompact", compact));
+
+    // §18.3: empty groups are hidden on demand (default false).
+    const hideEmpty = el("input", "yga-panel-check", { type: "checkbox" });
+    hideEmpty.checked = !!w.hideEmptyGroups;
+    hideEmpty.addEventListener("change", async () => {
+      await u.save("widget.hideEmptyGroups", hideEmpty.checked);
+    });
+    host.appendChild(u.field("widgetHideEmptyGroups", hideEmpty, "widgetHideEmptyGroupsHint"));
+
+    // §8.8: the «Группа» button in the header of a channel page.
+    const pageButton = el("input", "yga-panel-check", { type: "checkbox" });
+    pageButton.checked = w.channelPageButton !== false;
+    pageButton.addEventListener("change", async () => {
+      await u.save("widget.channelPageButton", pageButton.checked);
+    });
+    host.appendChild(u.field("widgetChannelPageButton", pageButton, "widgetChannelPageButtonHint"));
+
+    // §18.6: the profile sort orders channels inside groups.
+    const profileId = await yga.profiles.activeProfileId();
+    const profile = yga.profiles.get(profileId);
+    const sortSel = u.select(
+      [
+        { value: "activity", labelKey: "profileSortActivity" },
+        { value: "alpha", labelKey: "profileSortAlpha" },
+        { value: "subs", labelKey: "profileSortSubs" },
+        { value: "manual", labelKey: "profileSortManual" },
+        { value: "groups", labelKey: "profileSortGroups" }
+      ],
+      (profile && profile.sort) || "activity"
+    );
+    sortSel.addEventListener("change", async () => {
+      await yga.profiles.setSort(profileId, sortSel.value);
+      await yga.state.refreshVisible();
+    });
+    host.appendChild(u.field("profileSort", sortSel, "profileSortHint"));
   };
 
   // ---- Тема (§2, §8): follow YouTube + accent ----
@@ -628,21 +850,26 @@ window.yga = window.yga || {};
     const builder = BUILDERS[name];
     if (builder) {
       Promise.resolve(builder(node)).catch((e) => {
-        console.debug("[yga] panel section " + name + " failed:", e);
-        node.appendChild(u.placeholder("panelSectionError"));
+        console.warn("[yga] panel section " + name + " failed:", e);
+        const placeholder = u.placeholder("panelSectionError");
+        placeholder.title = String((e && (e.message || e)) || e);
+        node.appendChild(placeholder);
       });
     }
     return node;
   }
 
   yga.panelSections = {
-    buildAll(body) {
-      for (const name of ORDER) body.appendChild(buildSection(name));
+    names() {
+      return ORDER.slice();
     },
 
-    rebuild(node, name) {
-      if (!BUILDERS[name]) return;
-      node.replaceWith(buildSection(name));
+    title(name) {
+      return TITLES[name] || name;
+    },
+
+    buildSection(name) {
+      return buildSection(name);
     }
   };
 })(window.yga);

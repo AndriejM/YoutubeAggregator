@@ -9,6 +9,11 @@ window.yga = window.yga || {};
     '<path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" ' +
     'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
+  const CHEVRON_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
+    '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
   function el(tag, cls, attrs) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -114,6 +119,10 @@ window.yga = window.yga || {};
     applyWidgetSettings(widget);
     applyTheme();
     if (before.showZeroCount !== after.showZeroCount) yga.widget.applyCounts(lastList);
+    // Tree shape settings: empty-group visibility is a redraw, not a CSS
+    // repaint (§18.3). Profile sort changes arrive as a profile event, which
+    // already re-renders the tree (§18.6).
+    if (before.hideEmptyGroups !== after.hideEmptyGroups) yga.widget.render(lastList);
   }
 
   function wireSettings() {
@@ -364,10 +373,12 @@ window.yga = window.yga || {};
           return;
         }
         // lastVisitAt = now ⇒ nothing cached can be newer; paint the reset
-        // immediately, the counter bus confirms it a moment later.
+        // immediately, the counter bus confirms it a moment later. The group
+        // chip is the sum of its rows (§18.4), so it follows in the same tick.
         sub.lastVisitAt = visitAt;
         sub.newCount = 0;
         paintCount(row, sub);
+        paintGroupChips();
       });
     });
 
@@ -394,6 +405,148 @@ window.yga = window.yga || {};
   function curated() {
     const p = activeProfile();
     return !!(p && !p.includeAllSubs);
+  }
+
+  // --- group tree (stage 5, PLAN.md §18) ---
+  // The widget is a tree, not a flat list: one row per group (toggle + summed
+  // counter) and its channels indented below. Collapsed groups keep their
+  // channels out of the DOM, so their avatars are never fetched (§9).
+
+  const UNGROUPED = ""; // pseudo-group key (§18.2)
+  const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+  let groupChips = new Map(); // groupId|"" -> { chip, members } live chips
+  let ungroupedCollapsed = false; // §18.2: the pseudo-group has no storage
+  let ungroupedFor = null; // profile the in-memory collapse belongs to
+  let unsubGroups = null; // one live groups listener across SPA remounts
+
+  function byTitle(a, b) {
+    return collator.compare(a.title || "", b.title || "");
+  }
+
+  // Order inside a group (§18.6): the *profile* sort decides it — the tree is
+  // the primary UI, so profile.sort governs the order within groups. "activity"
+  // (§18.3 default) is counter desc, then locale-aware name.
+  function sortWithin(list, catalogOrder) {
+    const p = activeProfile();
+    const mode = (p && p.sort) || "activity";
+    const copy = list.slice();
+    if (mode === "alpha") return copy.sort(byTitle);
+    if (mode === "subs" || mode === "manual") {
+      return copy.sort((a, b) =>
+        (catalogOrder.get(a.channelId) || 0) - (catalogOrder.get(b.channelId) || 0) || byTitle(a, b)
+      );
+    }
+    return copy.sort((a, b) => (b.newCount || 0) - (a.newCount || 0) || byTitle(a, b));
+  }
+
+  function paintGroupChip(entry) {
+    let sum = 0;
+    let errorCount = 0;
+    for (const s of entry.members) {
+      if (s.counterError) errorCount++;
+      sum += s.newCount || 0;
+    }
+    // §18.4: the group chip is the plain sum — the 15+ ceiling is a per-channel
+    // RSS limit, not a group one. A zero group stays blank unless asked for.
+    let text = "";
+    if (sum) text = sum >= 100 ? "99+" : String(sum);
+    else if (widgetCfg().showZeroCount) text = "0";
+    if (errorCount) text += (text ? " " : "") + "(?×" + errorCount + ")";
+    entry.chip.textContent = text;
+    entry.chip.classList.toggle("yga-hidden", !text);
+    const title = yga.i18n("groupTotal").replace("{count}", String(sum));
+    entry.chip.title = title;
+    entry.chip.setAttribute("aria-label", title);
+  }
+
+  function paintGroupChips() {
+    for (const entry of groupChips.values()) paintGroupChip(entry);
+  }
+
+  async function toggleGroup(g) {
+    if (g.pseudo) {
+      ungroupedCollapsed = !ungroupedCollapsed;
+      yga.widget.render(lastList);
+      return;
+    }
+    if (!yga.groups) return;
+    await yga.groups.setCollapsed(g.id, !g.collapsed); // emits → the tree redraws
+  }
+
+  function groupNode(g, members, catalogOrder) {
+    const key = g.id || UNGROUPED;
+    const collapsed = g.pseudo ? ungroupedCollapsed : !!g.collapsed;
+    const boxId = "yga-gc-" + key.replace(/[^A-Za-z0-9_-]/g, "");
+    const wrap = el("div", "yga-group-wrap", { "data-yga-group": key || "none" });
+
+    const btn = el("button", "yga-group", {
+      type: "button",
+      "aria-expanded": collapsed ? "false" : "true",
+      "aria-controls": boxId,
+      title: g.name
+    });
+    const caret = el("span", "yga-group-caret");
+    caret.innerHTML = CHEVRON_SVG; // static markup, no YouTube data (PLAN.md §12)
+    if (collapsed) caret.classList.add("yga-collapsed");
+    const name = el("span", "yga-group-name");
+    name.textContent = g.name;
+    name.title = g.name;
+    const chip = el("span", "yga-count yga-group-count", { "aria-live": "polite" });
+
+    btn.appendChild(caret);
+    btn.appendChild(name);
+    btn.appendChild(chip);
+    btn.addEventListener("click", () => toggleGroup(g));
+    wrap.appendChild(btn);
+
+    if (!collapsed) {
+      const box = el("div", "yga-group-channels", { id: boxId });
+      for (const sub of sortWithin(members, catalogOrder)) box.appendChild(rowNode(sub));
+      wrap.appendChild(box);
+    }
+
+    const entry = { chip: chip, members: members };
+    groupChips.set(key, entry);
+    paintGroupChip(entry);
+    return wrap;
+  }
+
+  function renderGroups(list) {
+    groupChips = new Map();
+    // The pseudo-group collapse is per-profile in memory only (§18.2).
+    const pid = (yga.profiles && yga.profiles.lastActiveId()) || null;
+    if (ungroupedFor !== pid) {
+      ungroupedFor = pid;
+      ungroupedCollapsed = false;
+    }
+    const groups = yga.groups ? yga.groups.list() : [];
+    const known = new Set(groups.map((g) => g.id));
+    const catalogOrder = new Map();
+    list.forEach((s, i) => catalogOrder.set(s.channelId, i));
+
+    const buckets = new Map();
+    for (const sub of list) {
+      // A groupId pointing at a deleted group is «Без группы», not lost data.
+      const key = sub.groupId && known.has(sub.groupId) ? sub.groupId : UNGROUPED;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(sub);
+    }
+
+    const hideEmpty = !!widgetCfg().hideEmptyGroups;
+    const frag = document.createDocumentFragment();
+    for (const g of groups) {
+      const members = buckets.get(g.id) || [];
+      if (!members.length && hideEmpty) continue;
+      frag.appendChild(groupNode(g, members, catalogOrder));
+    }
+    // §18.2: the pseudo-group is last and only when it has channels.
+    const rest = buckets.get(UNGROUPED) || [];
+    if (rest.length) {
+      frag.appendChild(
+        groupNode({ id: UNGROUPED, name: yga.i18n("groupNone"), pseudo: true }, rest, catalogOrder)
+      );
+    }
+    return frag;
   }
 
   // --- channel membership picker for curated profiles (§9.2.1, stage 2) ---
@@ -498,6 +651,9 @@ window.yga = window.yga || {};
     pickerOpen = false;
     pickerData = null;
     pickerFilter = "";
+    // Called on every profile switch: group collapse is per-profile state, and
+    // the pseudo-group has no storage at all (§18.2), so it must not leak.
+    ungroupedCollapsed = false;
     const picker = widget && widget.querySelector(".yga-picker");
     if (picker) picker.remove();
   }
@@ -559,8 +715,7 @@ window.yga = window.yga || {};
         renderToolbar(widget);
         return;
       }
-      const frag = document.createDocumentFragment();
-      for (const sub of sortRows(list)) frag.appendChild(rowNode(sub));
+      const frag = renderGroups(list);
       host.appendChild(frag);
       renderToolbar(widget);
       const picker = widget.querySelector(".yga-picker");
@@ -568,7 +723,8 @@ window.yga = window.yga || {};
     },
 
     // Counter-only repaint (stage 3): patch .yga-count in place, no rebuild
-    // of rows, avatars or the picker (PLAN.md §10.7).
+    // of rows, avatars or the picker (PLAN.md §10.7). Group chips are the sum
+    // of their rows (§18.4), so they are repainted in the same pass.
     applyCounts(list) {
       if (!list) return;
       const widget = document.querySelector('[data-yga="widget"]');
@@ -580,6 +736,7 @@ window.yga = window.yga || {};
         const sub = byId.get(row.getAttribute("data-yga-row"));
         if (sub) paintCount(row, sub);
       }
+      paintGroupChips();
     },
 
     // Repaint after an account re-key: the picker must see the new catalog.
@@ -628,7 +785,18 @@ window.yga = window.yga || {};
     insertWidget(widget, mountedPosition, sections);
     applyWidgetSettings(widget);
 
-    if (yga.state) yga.state.getVisibleSubs().then((list) => yga.widget.render(list));
+    if (yga.groups) {
+      ungroupedCollapsed = false; // a rebuilt widget starts fully expanded
+      if (unsubGroups) unsubGroups();
+      // Group CRUD/renames redraw the tree through the shared state emit (§18.3).
+      unsubGroups = yga.groups.onGroupsChanged(() => yga.state.refreshVisible());
+    }
+    if (yga.state) {
+      // The tree needs the group mirror before its first paint, otherwise every
+      // channel would flash through «Без группы».
+      const ready = yga.groups ? yga.groups.load() : Promise.resolve();
+      Promise.all([ready, yga.state.getVisibleSubs()]).then((parts) => yga.widget.render(parts[1]));
+    }
     if (yga.profiles) {
       resetPicker(widget); // a rebuilt widget never inherits an open picker
       wireProfiles(widget);

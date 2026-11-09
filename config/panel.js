@@ -22,6 +22,9 @@ window.yga = window.yga || {};
   let keydownHandler = null;
   let navHandler = null;
   let activeSection = null;
+  let builtSection = null; // the one section currently in the body (§9.2.3)
+  let staleSections = null; // sections edited while hidden — rebuild on show
+  let modal = null; // §9.2.2 name dialog, Esc-closable before the panel
 
   function el(tag, cls, attrs) {
     const node = document.createElement(tag);
@@ -75,6 +78,70 @@ window.yga = window.yga || {};
     cleanups = [];
   }
 
+  // ---- single-field modal (§9.2.2: «+ Группа» is a modal with one name) ----
+
+  function closeModal() {
+    if (!modal) return;
+    const node = modal;
+    modal = null;
+    node.remove();
+  }
+
+  function openModal(opts) {
+    closeModal();
+    if (!panel) return null;
+    const box = el("div", "yga-panel-modal", {
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": yga.i18n(opts.titleKey)
+    });
+    const title = el("h3", "yga-panel-modal-title");
+    title.textContent = yga.i18n(opts.titleKey);
+    const input = el("input", "yga-panel-input", { type: "text", "aria-label": yga.i18n(opts.titleKey) });
+    input.value = opts.value || "";
+    const bar = el("div", "yga-panel-bar");
+    const ok = el("button", "yga-panel-btn yga-panel-primary", { type: "button" });
+    ok.textContent = yga.i18n(opts.confirmKey || "modalOk");
+    const cancel = el("button", "yga-panel-btn", { type: "button" });
+    cancel.textContent = yga.i18n(opts.cancelKey || "modalCancel");
+    bar.appendChild(ok);
+    bar.appendChild(cancel);
+    box.appendChild(title);
+    box.appendChild(input);
+    box.appendChild(bar);
+    panel.appendChild(box);
+    modal = box;
+
+    let done = false;
+    function submit() {
+      if (done) return;
+      done = true;
+      const value = input.value;
+      closeModal();
+      if (opts.onConfirm) opts.onConfirm(value);
+    }
+    function abort() {
+      if (done) return;
+      done = true;
+      closeModal();
+      if (opts.onCancel) opts.onCancel();
+    }
+    ok.addEventListener("click", submit);
+    cancel.addEventListener("click", abort);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        submit();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        abort();
+      }
+    });
+    if (input.focus) input.focus();
+    return box;
+  }
+
   function detachEvents() {
     if (keydownHandler) {
       document.removeEventListener("keydown", keydownHandler, true);
@@ -86,6 +153,40 @@ window.yga = window.yga || {};
     }
   }
 
+  // ---- tabs (§9.2.3): one section visible at a time, the rest not built ----
+  // A long page of seven stacked sections overflowed the panel with no scroll
+  // (§11 stage 4 known issue); a tab strip plus .yga-panel-body scroll fixes it.
+
+  function tabButton(name) {
+    const btn = el("button", "yga-panel-tab", {
+      type: "button",
+      role: "tab",
+      "data-tab": name,
+      "aria-selected": "false"
+    });
+    btn.textContent = yga.i18n(yga.panelSections.title(name));
+    btn.addEventListener("click", () => yga.panel.activate(name));
+    return btn;
+  }
+
+  function markTabs() {
+    if (!panel) return;
+    for (const btn of panel.querySelectorAll(".yga-panel-tab")) {
+      const on = btn.getAttribute("data-tab") === activeSection;
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      btn.classList.toggle("yga-active", on);
+    }
+  }
+
+  function showSection(name) {
+    if (!panel) return;
+    const body = panel.querySelector(".yga-panel-body");
+    if (!body) return;
+    body.textContent = "";
+    builtSection = name;
+    body.appendChild(yga.panelSections.buildSection(name));
+  }
+
   function buildPanel() {
     const node = el("div", "yga-panel", {
       "data-yga": "panel",
@@ -94,6 +195,7 @@ window.yga = window.yga || {};
       "aria-label": yga.i18n("configButton")
     });
     node.setAttribute(PANEL_ATTR, "");
+    node.setAttribute("data-yga-build", "stage5-tabs");
 
     const header = el("div", "yga-panel-header");
     const title = el("h2", "yga-panel-title");
@@ -108,10 +210,13 @@ window.yga = window.yga || {};
     header.appendChild(title);
     header.appendChild(close);
 
-    const body = el("div", "yga-panel-body");
+    const tabs = el("div", "yga-panel-tabs", { role: "tablist" });
+    for (const name of yga.panelSections.names()) tabs.appendChild(tabButton(name));
+
+    const body = el("div", "yga-panel-body", { role: "tabpanel" });
     node.appendChild(header);
+    node.appendChild(tabs);
     node.appendChild(body);
-    yga.panelSections.buildAll(body);
     return node;
   }
 
@@ -131,6 +236,9 @@ window.yga = window.yga || {};
     const node = panel;
     panel = null;
     activeSection = null;
+    builtSection = null;
+    staleSections = null;
+    closeModal();
     runCleanups();
     detachEvents();
     node.remove();
@@ -156,13 +264,19 @@ window.yga = window.yga || {};
       return null;
     }
     lockScroll(true);
+    yga.panel.activate(section || yga.panelSections.names()[0]);
+    const tabCount = panel.querySelectorAll(".yga-panel-tab").length;
+    if (tabCount !== yga.panelSections.names().length) {
+      console.warn("[yga] config panel tabs mismatch:", tabCount, yga.panelSections.names().length);
+    }
 
     keydownHandler = (ev) => {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closePanel();
-      }
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      // A modal (group name, §9.2.2) closes before the panel itself.
+      if (modal) closeModal();
+      else closePanel();
     };
     document.addEventListener("keydown", keydownHandler, true);
 
@@ -171,14 +285,23 @@ window.yga = window.yga || {};
       if (!panel) return;
       if (!panel.isConnected) {
         panel.remove();
+        const keep = activeSection;
         panel = buildPanel();
+        builtSection = null;
+        if (insert()) showSection(keep);
+        else {
+          panel = null;
+          runCleanups();
+          return;
+        }
+      } else if (!insert()) {
+        closePanel();
+        return;
       }
       restoreYouTube(); // the old host may be gone, but never leave it hidden
-      if (!insert()) closePanel();
     };
     window.addEventListener("yt-navigate-finish", navHandler);
 
-    if (section) yga.panel.activate(section);
     // Accent / theme-follow are owned by widget.js (one source for both surfaces).
     if (yga.widget && yga.widget.applyTheme) yga.widget.applyTheme();
     const close = panel.querySelector(".yga-panel-close");
@@ -215,7 +338,8 @@ window.yga = window.yga || {};
         const select = el("select", "yga-panel-select");
         for (const opt of options) {
           const option = el("option", null, { value: opt.value });
-          option.textContent = yga.i18n(opt.labelKey);
+          // opt.text carries a user string (a group name) that is not an i18n key.
+          option.textContent = opt.text || yga.i18n(opt.labelKey);
           select.appendChild(option);
         }
         select.value = value;
@@ -267,6 +391,11 @@ window.yga = window.yga || {};
       },
       activeSection: function () {
         return activeSection;
+      },
+      // Single-field modal (§9.2.2). onConfirm receives the trimmed-or-empty
+      // raw value; validation is the caller's job so it can show its own hint.
+      modal: function (opts) {
+        return openModal(opts);
       }
     },
 
@@ -288,17 +417,24 @@ window.yga = window.yga || {};
     },
 
     // Rebuild one section in place (used after CRUD that changes other sections).
+    // Only the visible tab is rebuilt; a hidden one is marked stale and rebuilt
+    // when it is next activated (§9.2.3).
     refresh(name) {
       if (!panel) return;
-      const node = panel.querySelector('[data-section="' + name + '"]');
-      if (node && yga.panelSections.rebuild) yga.panelSections.rebuild(node, name);
+      if (name === activeSection && builtSection === name) {
+        showSection(name);
+        return;
+      }
+      if (!staleSections) staleSections = new Set();
+      staleSections.add(name);
     },
 
     activate(name) {
-      if (!panel) return;
+      if (!panel || !yga.panelSections.names().includes(name)) return;
       activeSection = name;
-      const node = panel.querySelector('[data-section="' + name + '"]');
-      if (node && node.scrollIntoView) node.scrollIntoView({ block: "start" });
+      markTabs();
+      if (builtSection !== name || (staleSections && staleSections.has(name))) showSection(name);
+      if (staleSections) staleSections.delete(name);
     }
   };
 })(window.yga);

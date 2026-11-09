@@ -29,6 +29,13 @@ window.yga = window.yga || {};
       "ytd-browse",
       "#page-manager",
       "ytd-page-manager"
+    ],
+    // Channel page header (§8.8): the «Группа» button lives next to the title.
+    channelHeader: [
+      "ytd-page-header #title-container-inner",
+      "ytd-page-header #text-container",
+      "ytd-page-header #top-bar",
+      "ytd-page-header"
     ]
   };
 

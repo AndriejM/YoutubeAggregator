@@ -294,6 +294,20 @@ window.yga = window.yga || {};
       return true;
     },
 
+    // Profile sort (§5: activity | alpha | subs | manual | groups). It drives
+    // the order of channels *inside* widget groups (§18.6), so the widget tab
+    // of the panel writes it here rather than duplicating a widget setting.
+    async setSort(id, sort) {
+      await this.load();
+      const p = profiles[id];
+      const allowed = ["activity", "alpha", "subs", "manual", "groups"];
+      if (!p || allowed.indexOf(sort) < 0 || p.sort === sort) return false;
+      p.sort = sort;
+      p.updatedAt = now();
+      await persistProfiles();
+      return true;
+    },
+
     // Composition = yga:profile-channels:<id> (addedAt/lastVisitAt/groupId/...)
     async getComposition(id) {
       return readComposition(id);
@@ -396,6 +410,45 @@ window.yga = window.yga || {};
       comp[channelId].lastVisitAt = now();
       await writeComposition(profileId, comp);
       return true;
+    },
+
+    // Assign channels to a group of this profile (§18, stage 5). One read and
+    // one write per selection. A channel missing from the composition is added
+    // implicitly — the channel-page button does this on assignment (§8.8) — and
+    // an excluded channel comes back, because choosing a group is a choice to
+    // keep it. groupId null/"" means «Без группы».
+    async setGroup(profileId, channelIds, groupId) {
+      const profile = this.get(profileId);
+      if (!profile || !Array.isArray(channelIds) || !channelIds.length) return 0;
+      const key = groupId || null;
+      const comp = await readComposition(profileId);
+      let changed = 0;
+      for (const channelId of channelIds) {
+        if (!channelId) continue;
+        if (!comp[channelId]) comp[channelId] = entry();
+        const rec = comp[channelId];
+        if (rec.groupId === key) continue;
+        rec.groupId = key;
+        delete rec.excluded;
+        changed++;
+      }
+      if (changed) await writeComposition(profileId, comp);
+      return changed;
+    },
+
+    // Group deletion (§18.1): its channels go back to «Без группы».
+    async clearGroup(profileId, groupId) {
+      const profile = this.get(profileId);
+      if (!profile || !groupId) return 0;
+      const comp = await readComposition(profileId);
+      let changed = 0;
+      for (const channelId in comp) {
+        if (comp[channelId].groupId !== groupId) continue;
+        comp[channelId].groupId = null;
+        changed++;
+      }
+      if (changed) await writeComposition(profileId, comp);
+      return changed;
     },
 
     onProfilesChanged(cb) {

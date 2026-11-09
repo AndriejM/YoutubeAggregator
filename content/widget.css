@@ -351,6 +351,173 @@
   display: none;
 }
 
+/* Group tree (PLAN.md §18): a group row is a full-width toggle button, its
+   channels are indented below it. Collapsed groups keep channels out of the
+   DOM entirely, so their avatars are never fetched (§9). */
+.yga-group-wrap {
+  display: block;
+}
+
+.yga-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px 5px 12px;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  color: var(--yga-fg);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.yga-group:hover {
+  background: var(--yga-hover);
+}
+
+.yga-group:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-group-caret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--yga-fg-dim);
+  transition: transform 0.12s ease;
+}
+
+.yga-group-caret.yga-collapsed {
+  transform: rotate(-90deg);
+}
+
+.yga-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yga-group-count {
+  font-weight: 400;
+}
+
+.yga-group-channels {
+  display: block;
+  padding-left: 16px;
+}
+
+.yga-widget.yga-compact .yga-group {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* «Группа» in a channel page header (PLAN.md §8.8). It lives outside the
+   widget, so it declares its own theme variables. */
+.yga-gp-btn {
+  --yga-fg: var(--yt-spec-text-primary, #0f0f0f);
+  --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
+  --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
+  --yga-border: var(--yt-spec-outline, rgba(0, 0, 0, 0.15));
+  --yga-accent: #c00;
+  --yga-surface: var(--yt-spec-general-background-a, #fff);
+
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin: 4px 8px 0 0;
+  padding: 0 12px;
+  font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
+  font-size: 13px;
+  color: var(--yga-fg);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+.yga-gp-btn:hover {
+  background: var(--yga-hover);
+}
+
+.yga-gp-btn:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-gp-btn.yga-gp-set {
+  color: var(--yga-accent);
+  border-color: var(--yga-accent);
+}
+
+.yga-gp-menu {
+  position: absolute;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  color: var(--yga-fg, #0f0f0f);
+  background: var(--yga-surface, #fff);
+  border: 1px solid var(--yga-border, rgba(0, 0, 0, 0.15));
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+
+.yga-gp-item {
+  display: block;
+  padding: 7px 10px;
+  font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.yga-gp-item:hover {
+  background: var(--yga-hover, rgba(0, 0, 0, 0.05));
+}
+
+.yga-gp-item.yga-active {
+  color: var(--yga-accent, #c00);
+  font-weight: 500;
+}
+
+.yga-gp-quick {
+  display: flex;
+  gap: 6px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--yga-border, rgba(0, 0, 0, 0.15));
+  margin-top: 4px;
+}
+
+.yga-gp-input {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  font-size: 13px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--yga-border, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.yga-gp-create {
+  flex: 0 0 auto;
+  color: var(--yga-accent, #c00);
+}
+
 /* theme.followYouTube: false — pin the light palette over html[dark] (§2) */
 .yga-widget.yga-force-light {
   --yga-fg: #0f0f0f;

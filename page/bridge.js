@@ -286,12 +286,37 @@
       return account;
     }
 
+    // Channel of the page being viewed (§8.8). Deliberately NOT ytcfg
+    // EXTERNAL_CHANNEL_ID: that is the signed-in user, not the channel on
+    // screen. channelMetadataRenderer and a canonical /channel/UC… link are
+    // page-scoped, so they stay correct on someone else's channel.
+    function cmdGetPageChannel() {
+      const data = window.ytInitialData;
+      const meta = data && data.metadata && data.metadata.channelMetadataRenderer;
+      const externalId = meta && meta.externalId;
+      let channelId = typeof externalId === "string" && externalId.indexOf("UC") === 0 ? externalId : "";
+      const title = meta ? txt(meta.title) : "";
+      if (!channelId) {
+        const link = document.querySelector('link[rel="canonical"]');
+        const href = (link && link.getAttribute("href")) || "";
+        const m = href.match(/\/channel\/(UC[0-9A-Za-z_-]{10,})/);
+        if (m) channelId = m[1];
+      }
+      if (!channelId) {
+        const tag = document.querySelector('meta[itemprop="channelId"]');
+        const content = (tag && tag.getAttribute("content")) || "";
+        if (content.indexOf("UC") === 0) channelId = content;
+      }
+      return { channelId: channelId, title: title };
+    }
+
     const COMMANDS = {
       getGuideSubscriptions: cmdGetGuideSubscriptions,
       getContext: cmdGetContext,
       browseSubscriptions: cmdBrowseSubscriptions,
       getSubscriptionsPage: cmdGetSubscriptionsPage,
-      getAccountInfo: cmdGetAccountInfo
+      getAccountInfo: cmdGetAccountInfo,
+      getPageChannel: cmdGetPageChannel
     };
 
     window.addEventListener("message", (event) => {

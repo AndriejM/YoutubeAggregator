@@ -61,6 +61,44 @@
   outline-offset: -2px;
 }
 
+/* Tabs (§9.2.3): one section at a time, so the panel never overflows */
+.yga-panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 900px;
+  margin: 0 auto 8px;
+  border-bottom: 1px solid var(--yga-border);
+}
+
+.yga-panel-tab {
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+}
+
+.yga-panel-tab:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-panel-tab[aria-selected="true"],
+.yga-panel-tab.yga-active {
+  color: var(--yga-fg);
+  border-bottom-color: var(--yga-accent);
+}
+
+.yga-panel-tab:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
 .yga-panel-body {
   max-width: 900px;
   margin: 0 auto;
@@ -178,9 +216,53 @@
   background: transparent;
 }
 
+/* Group assignment is a native <select> chip in the row (§18.5) */
 .yga-panel-group {
   flex: 0 0 22%;
+  min-width: 96px;
+  max-width: 180px;
+  height: 24px;
+  font-size: 12px;
   text-align: left;
+}
+
+.yga-panel-group.yga-panel-group-none {
+  color: var(--yga-fg-dim);
+}
+
+/* Group filter chips with n/m counters (§9.2.1, §18.5) */
+.yga-panel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.yga-panel-chip {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.yga-panel-chip:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-panel-chip[aria-pressed="true"],
+.yga-panel-chip.yga-active {
+  color: var(--yga-accent);
+  border-color: var(--yga-accent);
+}
+
+.yga-panel-chip:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
 }
 
 .yga-panel-avatar {
@@ -310,6 +392,37 @@
 
 .yga-panel-hidden-link {
   display: none;
+}
+
+/* Single-field modal (§9.2.2): «+ Группа» and rename */
+.yga-panel-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 10002;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 48px));
+  padding: 20px;
+  transform: translate(-50%, -50%);
+  color: var(--yga-fg);
+  background: var(--yga-surface);
+  border: 1px solid var(--yga-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.yga-panel-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.yga-panel-modal .yga-panel-bar {
+  justify-content: flex-end;
+  margin: 0;
 }
 
 /* theme.followYouTube: false — pin the light palette over html[dark] (§2) */
