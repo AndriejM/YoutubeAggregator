@@ -953,6 +953,23 @@ window.yga = window.yga || {};
     toolbar.appendChild(btn);
   }
 
+  // Counter-only repaint (stage 3): patch .yga-count in place, no rebuild
+  // of rows, avatars or the picker (PLAN.md §10.7). Group chips are the sum
+  // of their rows (§18.4), so they are repainted in the same pass.
+  function applyCounts(list) {
+    if (!list) return;
+    const widget = document.querySelector('[data-yga="widget"]');
+    if (!widget) return;
+    const byId = new Map();
+    for (const sub of list) byId.set(sub.channelId, sub);
+    const rows = widget.querySelectorAll(".yga-list [data-yga-row]");
+    for (const row of rows) {
+      const sub = byId.get(row.getAttribute("data-yga-row"));
+      if (sub) paintCount(row, sub);
+    }
+    paintGroupChips();
+  }
+
   yga.widget = {
     // Last list handed to render() (shared objects, decorated in place).
     lastRendered() {
@@ -981,28 +998,13 @@ window.yga = window.yga || {};
       renderGroups(list);
       // Reused rows carry their previous chips — repaint them, exactly as the
       // freshly built ones are painted in rowNode (§10.4).
-      this.applyCounts(list);
+      applyCounts(list);
       renderToolbar(widget);
       const picker = widget.querySelector(".yga-picker");
       if (picker) fillPicker(picker);
     },
 
-    // Counter-only repaint (stage 3): patch .yga-count in place, no rebuild
-    // of rows, avatars or the picker (PLAN.md §10.7). Group chips are the sum
-    // of their rows (§18.4), so they are repainted in the same pass.
-    applyCounts(list) {
-      if (!list) return;
-      const widget = document.querySelector('[data-yga="widget"]');
-      if (!widget) return;
-      const byId = new Map();
-      for (const sub of list) byId.set(sub.channelId, sub);
-      const rows = widget.querySelectorAll(".yga-list [data-yga-row]");
-      for (const row of rows) {
-        const sub = byId.get(row.getAttribute("data-yga-row"));
-        if (sub) paintCount(row, sub);
-      }
-      paintGroupChips();
-    },
+    applyCounts: applyCounts,
 
     // Repaint after an account re-key: the picker must see the new catalog.
     refresh() {

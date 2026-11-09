@@ -435,6 +435,18 @@ env.sandbox.chrome.storage.local
     yga.widget.render(subs);
     yga.counters.wire(widget);
 
+    let detachedRenderOk = true;
+    try {
+      await Promise.resolve(subs).then(yga.widget.render);
+    } catch (e) {
+      detachedRenderOk = false;
+    }
+    check(
+      "render: detached render keeps applyCounts",
+      detachedRenderOk && !!widget.querySelector('[data-yga-row="' + CH1 + '"]'),
+      "Promise.resolve(subs).then(yga.widget.render) threw"
+    );
+
     const row = widget.querySelector('[data-yga-row="' + CH1 + '"]');
     const chip = () => row.querySelector(".yga-count");
     check("dom: row rendered", !!row);
