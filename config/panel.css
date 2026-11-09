@@ -11,9 +11,11 @@
 
   box-sizing: border-box;
   display: block;
-  /* YT-override: the masthead is fixed, so the panel must clear it itself */
-  min-height: calc(100vh - 56px);
-  padding: 16px 24px 64px;
+  /* YT-override: #content starts at y=0 (the masthead offset lives on
+     ytd-page-manager's margin-top), so the panel must clear the fixed
+     masthead itself — otherwise its header sits behind it. */
+  min-height: calc(100vh - var(--ytd-toolbar-height, 56px));
+  padding: calc(var(--ytd-toolbar-height, 56px) + 16px) 24px 64px;
   color: var(--yga-fg);
   background: var(--yga-surface);
   font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);

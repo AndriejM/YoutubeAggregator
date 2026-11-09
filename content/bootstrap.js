@@ -53,7 +53,13 @@
     const root = yga.selectors.find("app") || document.body;
     observer = new MutationObserver(() => ensureMounted());
     observer.observe(root, { childList: true, subtree: true });
-    timeoutId = setTimeout(observerStop, MOUNT_TIMEOUT_MS);
+    timeoutId = setTimeout(() => {
+      // Guide never appeared within the timeout — "broken" telemetry (§6 stage 6).
+      if (!document.querySelector('[data-yga="widget"]')) {
+        yga.selectors.journal("mount-timeout", String(MOUNT_TIMEOUT_MS));
+      }
+      observerStop();
+    }, MOUNT_TIMEOUT_MS);
   }
 
   async function refreshSubscriptions() {

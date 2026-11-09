@@ -195,7 +195,10 @@ window.yga = window.yga || {};
       "aria-label": yga.i18n("configButton")
     });
     node.setAttribute(PANEL_ATTR, "");
-    node.setAttribute("data-yga-build", "stage5-tabs");
+    // Build marker: a stale content script (extension tile reloaded but the
+    // YouTube tab not refreshed) shows the old panel — check this attribute
+    // in DevTools or the console line logged on open.
+    node.setAttribute("data-yga-build", "stage6b");
 
     const header = el("div", "yga-panel-header");
     const title = el("h2", "yga-panel-title");
@@ -264,6 +267,8 @@ window.yga = window.yga || {};
       return null;
     }
     lockScroll(true);
+    console.info("[yga] panel build:", panel.getAttribute("data-yga-build"),
+      "tabs:", panel.querySelectorAll(".yga-panel-tab").length);
     yga.panel.activate(section || yga.panelSections.names()[0]);
     const tabCount = panel.querySelectorAll(".yga-panel-tab").length;
     if (tabCount !== yga.panelSections.names().length) {

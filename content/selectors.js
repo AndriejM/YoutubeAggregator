@@ -41,6 +41,40 @@ window.yga = window.yga || {};
 
   const missLog = new Set();
 
+  // "Broken" telemetry (PLAN.md §6 stage 6): console + a bounded local journal
+  // in chrome.storage.local under yga:log. Local only — nothing ever leaves
+  // the browser (§12, privacy). Entries: { t, kind, detail }.
+  const LOG_KEY = "yga:log";
+  const LOG_MAX = 100;
+  const LOG_FLUSH_MS = 1000;
+
+  let logQueue = [];
+  let flushTimer = 0;
+
+  async function flushLog() {
+    flushTimer = 0;
+    if (!logQueue.length) return;
+    const entries = logQueue;
+    logQueue = [];
+    try {
+      const stored = await chrome.storage.local.get(LOG_KEY);
+      const prev = Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
+      const next = prev.concat(entries).slice(-LOG_MAX);
+      await chrome.storage.local.set({ [LOG_KEY]: next });
+    } catch (e) {
+      // Storage unavailable (unit harness without chrome, incognito limits).
+      console.debug("[yga] journal flush failed:", e);
+    }
+  }
+
+  function journal(kind, detail) {
+    logQueue.push({ t: Date.now(), kind: kind, detail: detail });
+    if (!flushTimer) {
+      flushTimer = setTimeout(flushLog, LOG_FLUSH_MS);
+      if (flushTimer && typeof flushTimer.unref === "function") flushTimer.unref();
+    }
+  }
+
   yga.selectors = {
     find(name, root) {
       const chain = SELECTORS[name];
@@ -59,6 +93,10 @@ window.yga = window.yga || {};
       missLog.add(name);
       // Local telemetry only (PLAN.md §12, privacy).
       console.debug("[yga] selector miss:", name);
-    }
+      journal("selector-miss", name);
+    },
+
+    // Shared journal for other failure telemetry (mount timeout, bridge loss).
+    journal: journal
   };
 })(window.yga);

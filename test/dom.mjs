@@ -632,6 +632,17 @@ env.sandbox.chrome.storage.local
         !!pseudo.querySelector('[data-yga-row="' + CH1 + '"]')
     );
 
+    // Stage 6: "broken" telemetry — selector misses land in the yga:log journal.
+    yga.selectors.reportMiss("test-miss-anchor");
+    await new Promise((r) => setTimeout(r, 1200));
+    const logged = await env.sandbox.chrome.storage.local.get("yga:log");
+    const entries = logged["yga:log"] || [];
+    check(
+      "telemetry: selector miss is journaled to yga:log (stage 6)",
+      entries.some((e) => e.kind === "selector-miss" && e.detail === "test-miss-anchor"),
+      JSON.stringify(entries)
+    );
+
     report();
   })
   .catch((e) => {

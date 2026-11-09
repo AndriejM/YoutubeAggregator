@@ -6,6 +6,9 @@
   "default_locale": "en",
   "description": "__MSG_extDescription__",
   "action": { "default_title": "__MSG_extName__" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
