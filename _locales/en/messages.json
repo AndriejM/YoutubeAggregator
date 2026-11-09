@@ -343,6 +343,14 @@
     "message": "Top of the guide",
     "description": "Widget position: first in the guide"
   },
+  "moveUp": {
+    "message": "Move widget up",
+    "description": "Tooltip of the widget footer button that moves the widget one slot up in the guide"
+  },
+  "moveDown": {
+    "message": "Move widget down",
+    "description": "Tooltip of the widget footer button that moves the widget one slot down in the guide"
+  },
   "widgetWidth": {
     "message": "Widget width, px",
     "description": "Label of the widget width field"

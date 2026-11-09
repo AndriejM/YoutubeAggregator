@@ -6,6 +6,7 @@
   --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
   --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
   --yga-border: var(--yt-spec-outline, rgba(0, 0, 0, 0.15));
+  --yga-surface: var(--yt-spec-general-background-a, #fff);
   --yga-accent: #c00;
   --yga-indent: var(--yt-guide-item-indent, 24px);
 
@@ -37,11 +38,20 @@
   height: 28px;
   font: inherit;
   color: var(--yga-fg);
-  background: transparent;
+  /* YT-override: a transparent select makes Chrome paint its native option
+     list on the OS default (white) while our theme keeps the text white —
+     white on white, readable only on hover. A solid surface fixes both. */
+  background: var(--yga-surface);
   border: 1px solid var(--yga-border);
   border-radius: 6px;
   padding: 0 4px;
   cursor: pointer;
+}
+
+/* YT-override: the popup rows are painted from the <option>, not the page */
+.yga-profile-select option {
+  color: var(--yga-fg);
+  background: var(--yga-surface);
 }
 
 .yga-profile-select:disabled {
@@ -154,6 +164,51 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px 4px 16px;
+}
+
+/* Guide slot controls (PLAN.md §8.3): ▲/▼ rehang the whole widget inside the
+   guide, at the bottom of the widget — the PocketTube interaction. */
+.yga-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 8px 2px 16px;
+}
+
+.yga-move {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.yga-move:hover:not(:disabled) {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-move:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-move:disabled,
+.yga-move.yga-off {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.yga-widget.yga-compact .yga-footer {
+  padding-top: 1px;
+  padding-bottom: 1px;
 }
 
 /* New-video counters (PLAN.md §10) */
@@ -524,5 +579,6 @@
   --yga-fg-dim: #606060;
   --yga-hover: rgba(0, 0, 0, 0.05);
   --yga-border: rgba(0, 0, 0, 0.15);
+  --yga-surface: #fff;
   color: #0f0f0f;
 }

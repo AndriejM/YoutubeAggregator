@@ -14,6 +14,28 @@ window.yga = window.yga || {};
     '<path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+  const ARROW_UP_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
+    '<path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  const ARROW_DOWN_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
+    '<path d="M12 5v14M5 12l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  // Debug breadcrumb: "tp-yt-app-drawer#guide > div#guide-inner-content > …"
+  function nodePath(node) {
+    const parts = [];
+    for (let n = node; n && parts.length < 4; n = n.parentElement) {
+      const cls = typeof n.className === "string" && n.className.trim()
+        ? "." + n.className.trim().split(/\s+/).slice(0, 2).join(".")
+        : "";
+      parts.unshift(n.tagName.toLowerCase() + (n.id ? "#" + n.id : "") + cls);
+    }
+    return parts.join(" > ");
+  }
+
   function el(tag, cls, attrs) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -57,7 +79,9 @@ window.yga = window.yga || {};
   // profiles.onSettingsChanged, so every edit lands without a reload.
   let settings = null;
   let unsubSettings = null;
-  let mountedPosition = null;
+  let mountedPosition = null; // widget.position applied at the last mount
+  let mountedSlot = null; // widget.guideIndex applied at the last mount
+  let mountedIndex = null; // live index of the widget inside its guide host
   let themeObserver = null;
 
   function widgetCfg() {
@@ -66,6 +90,74 @@ window.yga = window.yga || {};
 
   function positionOf(s) {
     return ((s && s.widget) || {}).position || "afterSubscriptions";
+  }
+
+  // widget.guideIndex (PLAN.md §8.3): an explicit slot among the guide's
+  // sections, written by the ▲/▼ buttons in the widget footer. null means
+  // "derive the slot from widget.position" (the stage-0 behaviour).
+  function guideIndexOf(s) {
+    const raw = ((s && s.widget) || {}).guideIndex;
+    return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : null;
+  }
+
+  function widgetIndex(widget, host) {
+    const kids = (host && host.children) || [];
+    for (let i = 0; i < kids.length; i++) if (kids[i] === widget) return i;
+    return -1;
+  }
+
+  // Rehang the widget at `index` among the host's children. The widget is
+  // detached first, so `index` counts the list without it.
+  function placeAt(widget, index, host) {
+    const parent = host || widget.parentNode;
+    if (!parent) return -1;
+    widget.remove();
+    const kids = parent.children;
+    const at = Math.max(0, Math.min(index, kids.length));
+    parent.insertBefore(widget, kids[at] || null);
+    return at;
+  }
+
+  // ▲/▼ live at the widget edges: the first slot cannot go up, the last not down.
+  function updateMoveButtons(widget) {
+    const up = widget.querySelector(".yga-move-up");
+    const down = widget.querySelector(".yga-move-down");
+    if (!up || !down) return;
+    const host = widget.parentNode;
+    const live = widgetIndex(widget, host);
+    mountedIndex = live;
+    const movable = live >= 0 && host.children.length > 1;
+    up.disabled = !movable || live <= 0;
+    down.disabled = !movable || live >= host.children.length - 1;
+    up.classList.toggle("yga-off", up.disabled);
+    down.classList.toggle("yga-off", down.disabled);
+  }
+
+  // One step up/down in the guide, persisted so the slot survives the SPA
+  // remounts YouTube forces on guide rebuilds (PLAN.md §8.3).
+  async function moveWidget(widget, delta) {
+    if (!yga.profiles) return;
+    const host = widget.parentNode;
+    const live = widgetIndex(widget, host);
+    if (live < 0) return;
+    const target = Math.max(0, Math.min(live + delta, host.children.length - 1));
+    if (target === live) return;
+    mountedIndex = placeAt(widget, target, host);
+    mountedSlot = mountedIndex;
+    updateMoveButtons(widget);
+    await yga.profiles.saveSettingsPath("widget.guideIndex", mountedIndex);
+  }
+
+  // Follow a slot edit made elsewhere (the config panel, another tab). Our own
+  // ▲/▼ click already moved the node, so this is usually a no-op.
+  function applyGuideIndex(widget) {
+    const want = guideIndexOf(settings);
+    if (want === null) return;
+    const host = widget.parentNode;
+    if (!host) return;
+    if (widgetIndex(widget, host) !== want) mountedIndex = placeAt(widget, want, host);
+    mountedSlot = want;
+    updateMoveButtons(widget);
   }
 
   function applyWidgetSettings(widget) {
@@ -109,10 +201,11 @@ window.yga = window.yga || {};
     settings = next;
     const widget = document.querySelector('[data-yga="widget"]');
     if (!widget) return;
-    if (positionOf(next) !== mountedPosition) {
-      widget.remove(); // position is a mount decision, not a repaint
-      yga.mountWidget();
-      return;
+    // Named position and an explicit slot are mount decisions; dropping back
+    // to a derived slot can only be done by mounting again.
+    if (positionOf(next) !== mountedPosition ||
+        (guideIndexOf(next) === null && mountedSlot !== null)) {
+      repositionWidget(widget, "settings-position");
     }
     const before = (previous && previous.widget) || {};
     const after = next.widget || {};
@@ -123,6 +216,8 @@ window.yga = window.yga || {};
     // repaint (§18.3). Profile sort changes arrive as a profile event, which
     // already re-renders the tree (§18.6).
     if (before.hideEmptyGroups !== after.hideEmptyGroups) yga.widget.render(lastList);
+    // A slot move is a DOM rehang, not a remount: the list keeps its DOM.
+    if (guideIndexOf(previous) !== guideIndexOf(next)) applyGuideIndex(widget);
   }
 
   function wireSettings() {
@@ -136,10 +231,8 @@ window.yga = window.yga || {};
       settings = stored;
       const widget = document.querySelector('[data-yga="widget"]');
       if (!widget) return;
-      if (positionOf(stored) !== mountedPosition) {
-        widget.remove();
-        yga.mountWidget();
-        return;
+      if (positionOf(stored) !== mountedPosition || guideIndexOf(stored) !== mountedSlot) {
+        repositionWidget(widget, "settings-stored");
       }
       applyWidgetSettings(widget);
       applyTheme();
@@ -275,8 +368,29 @@ window.yga = window.yga || {};
 
     const list = el("div", "yga-list", { "aria-live": "polite" });
 
+    // Guide slot controls (PLAN.md §8.3) — the PocketTube way of moving the
+    // widget up/down the sidebar without opening the configuration panel.
+    const footer = el("div", "yga-footer");
+    const up = el("button", "yga-move yga-move-up", {
+      type: "button",
+      "aria-label": yga.i18n("moveUp"),
+      title: yga.i18n("moveUp")
+    });
+    up.innerHTML = ARROW_UP_SVG; // static markup, no YouTube data (PLAN.md §12)
+    const down = el("button", "yga-move yga-move-down", {
+      type: "button",
+      "aria-label": yga.i18n("moveDown"),
+      title: yga.i18n("moveDown")
+    });
+    down.innerHTML = ARROW_DOWN_SVG;
+    up.addEventListener("click", () => moveWidget(widget, -1));
+    down.addEventListener("click", () => moveWidget(widget, 1));
+    footer.appendChild(up);
+    footer.appendChild(down);
+
     widget.appendChild(header);
     widget.appendChild(list);
+    widget.appendChild(footer);
 
     const title = el("div", "yga-widget-title");
     title.textContent = yga.i18n("widgetTitle");
@@ -325,8 +439,71 @@ window.yga = window.yga || {};
     count.classList.toggle("yga-stale", !!sub.counterStale);
   }
 
+  let navLock = false;
+
+  function navigateSpa(href) {
+    if (navLock) return;
+    navLock = true;
+    const from = window.location.href;
+    let spaStarted = false;
+    let spaLogged = false;
+    const clearLock = () => { navLock = false; };
+    const markSpa = () => {
+      if (!spaLogged) {
+        spaLogged = true;
+        yga.selectors.journal("row-nav", "spa " + href);
+      }
+      spaStarted = true;
+    };
+    window.addEventListener("yt-navigate-start", markSpa, { once: true });
+    window.addEventListener("yt-navigate-finish", () => {
+      markSpa();
+      clearLock();
+    }, { once: true });
+
+    function fallback(reason) {
+      if (spaStarted || window.location.href !== from) {
+        clearLock();
+        return;
+      }
+      yga.selectors.journal("row-nav", reason + " " + href);
+      clearLock();
+      window.location.href = href;
+    }
+
+    if (!yga.bridge || typeof yga.bridge.call !== "function") {
+      fallback("no-bridge");
+      return;
+    }
+
+    yga.selectors.journal("row-nav", "bridge " + href);
+    setTimeout(clearLock, 10000);
+    yga.bridge.call("navigate", href, 9000).then((res) => {
+      if (spaStarted || window.location.href !== from) {
+        clearLock();
+        return;
+      }
+      const api = res && res.api ? res.api : "unknown";
+      if (res && res.ok) {
+        yga.selectors.journal("row-nav", "bridge-ok " + api + " " + href);
+        return;
+      }
+      const err = res && res.error ? res.error : (res && res.errors ? res.errors : "none");
+      fallback("bridge-" + api + ":" + String(err).slice(0, 80));
+    }).catch((e) => {
+      fallback("bridge-err:" + String(e && e.message || e).slice(0, 80));
+    });
+  }
+
   function rowNode(sub) {
-    const row = el("a", "yga-row", {
+    // spf-link is mandatory, not cosmetic: YouTube's spf.js click handler is
+    //   if (metaKey||altKey||ctrlKey||shiftKey||button>0) return null;
+    //   var b = closest(target, ".spf-link");
+    //   return !b || closest(target, ".spf-nolink") ? null : closestAnchor(target, b).href;
+    // — no .spf-link ancestor means SPF declines the click and the browser does
+    // a real page load, which is the "clicking a channel reloads YouTube" bug.
+    // yt-simple-endpoint is YouTube's own endpoint class (cursor/hover/a11y).
+    const row = el("a", "yga-row spf-link yt-simple-endpoint", {
       href: "/channel/" + sub.channelId + "/videos",
       title: sub.title,
       "data-yga-row": sub.channelId
@@ -352,9 +529,25 @@ window.yga = window.yga || {};
 
     // Click in the widget resets the counter, then navigates to /videos
     // (PLAN.md §10.5 — the decision fixed 2026-11-07).
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (ev) => {
+      // Flicker breadcrumb: if a boot-doc follows this with the same URL,
+      // the click did a full navigation (SPF declined it).
+      const href = row.getAttribute("href");
+      yga.selectors.journal("row-click", href);
       const profileId = yga.profiles && yga.profiles.lastActiveId();
       if (profileId) yga.state.markVisited(profileId, sub.channelId);
+      // spf-link/yt-simple-endpoint classes proved NOT enough (journal:
+      // type=navigate right after row-click) — YouTube's interception skips
+      // foreign anchors. Try the page's own SPA entry points; if none works,
+      // fall back to the plain link so a click always navigates.
+      if (ev.defaultPrevented || ev.button > 0 ||
+          ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      if (href === window.location.pathname) {
+        ev.preventDefault();
+        return;
+      }
+      ev.preventDefault();
+      navigateSpa(href);
     });
 
     // No config panel yet (stage 4): right-click is the interim "mark as
@@ -463,6 +656,59 @@ window.yga = window.yga || {};
     for (const entry of groupChips.values()) paintGroupChip(entry);
   }
 
+  // data-yga-group value of a group (the pseudo-group renders as "none").
+  function dataKeyOf(g) {
+    return (g.id || UNGROUPED) || "none";
+  }
+
+  // Identity of a group's contents: same ids in the same order means the
+  // subtree can be reused instead of rebuilt (no flicker on re-render).
+  function memberSig(members) {
+    let sig = "";
+    for (const m of members) sig += (sig ? "," : "") + m.channelId;
+    return sig;
+  }
+
+  // The tree we want, in render order (§18.2/§18.3): declared groups by
+  // storage order, then «Без группы» last and only when it has channels.
+  function planGroups(list) {
+    // The pseudo-group collapse is per-profile in memory only (§18.2).
+    const pid = (yga.profiles && yga.profiles.lastActiveId()) || null;
+    if (ungroupedFor !== pid) {
+      ungroupedFor = pid;
+      ungroupedCollapsed = false;
+    }
+    const groups = yga.groups ? yga.groups.list() : [];
+    const known = new Set(groups.map((g) => g.id));
+    const catalogOrder = new Map();
+    list.forEach((s, i) => catalogOrder.set(s.channelId, i));
+
+    const buckets = new Map();
+    for (const sub of list) {
+      // A groupId pointing at a deleted group is «Без группы», not lost data.
+      const key = sub.groupId && known.has(sub.groupId) ? sub.groupId : UNGROUPED;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(sub);
+    }
+
+    const hideEmpty = !!widgetCfg().hideEmptyGroups;
+    const plan = [];
+    for (const g of groups) {
+      const members = buckets.get(g.id) || [];
+      if (!members.length && hideEmpty) continue;
+      plan.push({ g: g, members: members, catalogOrder: catalogOrder });
+    }
+    const rest = buckets.get(UNGROUPED) || [];
+    if (rest.length) {
+      plan.push({
+        g: { id: UNGROUPED, name: yga.i18n("groupNone"), pseudo: true },
+        members: rest,
+        catalogOrder: catalogOrder
+      });
+    }
+    return plan;
+  }
+
   async function toggleGroup(g) {
     if (g.pseudo) {
       ungroupedCollapsed = !ungroupedCollapsed;
@@ -508,45 +754,63 @@ window.yga = window.yga || {};
     const entry = { chip: chip, members: members };
     groupChips.set(key, entry);
     paintGroupChip(entry);
+    // Reconciliation markers (renderGroups): a wrap with the same collapse
+    // state and the same members is reused as-is instead of being rebuilt.
+    wrap._ygaCollapsed = collapsed;
+    wrap._ygaSig = memberSig(members);
     return wrap;
   }
 
   function renderGroups(list) {
     groupChips = new Map();
-    // The pseudo-group collapse is per-profile in memory only (§18.2).
-    const pid = (yga.profiles && yga.profiles.lastActiveId()) || null;
-    if (ungroupedFor !== pid) {
-      ungroupedFor = pid;
-      ungroupedCollapsed = false;
-    }
-    const groups = yga.groups ? yga.groups.list() : [];
-    const known = new Set(groups.map((g) => g.id));
-    const catalogOrder = new Map();
-    list.forEach((s, i) => catalogOrder.set(s.channelId, i));
+    const host = document.querySelector('[data-yga="widget"] .yga-list');
+    if (!host) return;
 
-    const buckets = new Map();
-    for (const sub of list) {
-      // A groupId pointing at a deleted group is «Без группы», not lost data.
-      const key = sub.groupId && known.has(sub.groupId) ? sub.groupId : UNGROUPED;
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(sub);
+    const plan = planGroups(list);
+    const live = new Map();
+    for (const node of Array.from(host.children)) {
+      const key = node.getAttribute && node.getAttribute("data-yga-group");
+      if (key) live.set(key, node);
     }
 
-    const hideEmpty = !!widgetCfg().hideEmptyGroups;
-    const frag = document.createDocumentFragment();
-    for (const g of groups) {
-      const members = buckets.get(g.id) || [];
-      if (!members.length && hideEmpty) continue;
-      frag.appendChild(groupNode(g, members, catalogOrder));
+    let reused = 0;
+    const wanted = [];
+    for (const item of plan) {
+      const key = dataKeyOf(item.g);
+      const collapsed = item.g.pseudo ? ungroupedCollapsed : !!item.g.collapsed;
+      const sig = memberSig(item.members);
+      const existing = live.get(key);
+      // Unchanged group: keep the node, so its rows, avatars and the scroll
+      // position survive. Only the label can need a repaint (rename).
+      if (existing && existing._ygaCollapsed === collapsed && existing._ygaSig === sig) {
+        reused++;
+        live.delete(key);
+        const name = existing.querySelector(".yga-group-name");
+        if (name && name.textContent !== item.g.name) {
+          name.textContent = item.g.name;
+          name.title = item.g.name;
+        }
+        const btn = existing.querySelector(".yga-group");
+        if (btn) btn.title = item.g.name;
+        groupChips.set(item.g.id || UNGROUPED, {
+          chip: existing.querySelector(".yga-group-count"),
+          members: item.members
+        });
+        wanted.push(existing);
+        continue;
+      }
+      wanted.push(groupNode(item.g, item.members, item.catalogOrder));
     }
-    // §18.2: the pseudo-group is last and only when it has channels.
-    const rest = buckets.get(UNGROUPED) || [];
-    if (rest.length) {
-      frag.appendChild(
-        groupNode({ id: UNGROUPED, name: yga.i18n("groupNone"), pseudo: true }, rest, catalogOrder)
-      );
+
+    for (const node of live.values()) node.remove();
+    // Reorder only when the sequence actually drifted.
+    for (let i = 0; i < wanted.length; i++) {
+      if (host.children[i] !== wanted[i]) host.insertBefore(wanted[i], host.children[i] || null);
     }
-    return frag;
+    // Flicker breadcrumb: rebuilt>0 means whole groups were thrown away.
+    if (wanted.length - reused > 0) {
+      yga.selectors.journal("render", "rebuilt=" + (wanted.length - reused) + " reused=" + reused);
+    }
   }
 
   // --- channel membership picker for curated profiles (§9.2.1, stage 2) ---
@@ -703,20 +967,21 @@ window.yga = window.yga || {};
       const widget = document.querySelector('[data-yga="widget"]');
       if (!widget) return;
       const host = widget.querySelector(".yga-list");
-      host.textContent = "";
 
-      if (!list) {
-        host.appendChild(placeholderRow("loadingSubs"));
+      if (!list || !list.length) {
+        host.textContent = "";
+        groupChips = new Map();
+        host.appendChild(placeholderRow(list ? emptyKey() : "loadingSubs"));
         renderToolbar(widget);
         return;
       }
-      if (!list.length) {
-        host.appendChild(placeholderRow(emptyKey()));
-        renderToolbar(widget);
-        return;
-      }
-      const frag = renderGroups(list);
-      host.appendChild(frag);
+      // Keyed reconciliation (PLAN.md §18.3): a group whose collapse state and
+      // members are unchanged keeps its DOM, so re-rendering after a catalog
+      // refresh or a profile switch no longer rebuilds the whole sidebar.
+      renderGroups(list);
+      // Reused rows carry their previous chips — repaint them, exactly as the
+      // freshly built ones are painted in rowNode (§10.4).
+      this.applyCounts(list);
       renderToolbar(widget);
       const picker = widget.querySelector(".yga-picker");
       if (picker) fillPicker(picker);
@@ -754,36 +1019,79 @@ window.yga = window.yga || {};
     }
   };
 
-  // Mount point chosen by widget.position (PLAN.md §8.3, panel section «Виджет»).
-  function insertWidget(widget, position, sections) {
-    if (position === "top") {
-      const root = yga.selectors.find("guideRoot") || sections;
-      root.insertBefore(widget, root.children[0] || null);
+  // The element the widget actually becomes a child of — the slot index in
+  // widget.guideIndex is relative to this (§8.3). Never inside the guide
+  // renderer's own subtree: ytd-guide-renderer re-renders #sections when a
+  // foreign child is inserted there, which removed our widget and made the
+  // whole sidebar flicker on every navigation (the loop our remount observer
+  // then fed). The drawer's inner-content wrapper is plain DOM — safe.
+  function widgetHost() {
+    return (
+      yga.selectors.find("guideRoot") ||
+      yga.selectors.find("guideSections")
+    );
+  }
+
+  // The Polymer-managed part of the guide the widget must stay outside of:
+  // a child of the host we insert beside. Null when the host itself is the
+  // managed subtree — then there is nowhere safer to go and we mount in it.
+  function guideManaged(host) {
+    const m = yga.selectors.find("guideRenderer") || yga.selectors.find("guideSections");
+    return m && m !== host ? m : null;
+  }
+
+  // Mount point chosen by widget.guideIndex, else by widget.position
+  // (PLAN.md §8.3, panel section «Виджет»): a sibling of the guide renderer.
+  function insertWidget(widget, position, host) {
+    const slot = guideIndexOf(settings);
+    if (slot !== null) {
+      mountedIndex = placeAt(widget, slot, host);
       return;
     }
-    const link = yga.selectors.find("subscriptionsLink");
-    if (link) {
-      const host = link.closest("yt-section") || link.parentNode;
-      host.insertAdjacentElement("afterend", widget);
-    } else {
-      sections.appendChild(widget);
+    const managed = guideManaged(host);
+    if (position === "top") {
+      host.insertBefore(widget, managed || host.children[0] || null);
+      mountedIndex = widgetIndex(widget, host);
+      return;
     }
+    // insertBefore (not insertAdjacentElement) so a rehang from a later slot
+    // lands directly after the managed subtree instead of staying put.
+    if (managed) host.insertBefore(widget, managed.nextSibling || null);
+    else host.appendChild(widget);
+    mountedIndex = widgetIndex(widget, host);
+  }
+
+  // A mount-decision change (named position or explicit slot) is a rehang of
+  // the live node, not a rebuild: the list, picker and listeners survive.
+  function repositionWidget(widget, reason) {
+    const host = widget.parentNode;
+    if (!host) return;
+    widget.remove();
+    insertWidget(widget, positionOf(settings), host);
+    mountedPosition = positionOf(settings);
+    mountedSlot = guideIndexOf(settings);
+    updateMoveButtons(widget);
+    yga.selectors.journal("reposition", reason + " @ " + nodePath(host));
   }
 
   // Idempotent mount (PLAN.md §8.2, §8.3): reuses a live node, rehangs a detached one.
-  yga.mountWidget = function mountWidget() {
+  yga.mountWidget = function mountWidget(reason) {
     const existing = document.querySelector('[data-yga="widget"]');
     if (existing && existing.isConnected) return existing;
     if (existing) existing.remove();
 
-    const sections =
-      yga.selectors.find("guideSections") || yga.selectors.find("guideRoot");
-    if (!sections) return null;
+    const host = widgetHost();
+    if (!host) return null;
 
     const widget = buildWidget();
     mountedPosition = positionOf(settings);
-    insertWidget(widget, mountedPosition, sections);
+    mountedSlot = guideIndexOf(settings);
+    insertWidget(widget, mountedPosition, host);
+    // Flicker breadcrumb (PLAN.md §6 stage 6): every mount is a visible
+    // sidebar change — the journal shows who remounts and where.
+    yga.selectors.journal("mount", (reason || "?") + " @ " + nodePath(widget.parentNode));
     applyWidgetSettings(widget);
+    updateMoveButtons(widget);
 
     if (yga.groups) {
       ungroupedCollapsed = false; // a rebuilt widget starts fully expanded

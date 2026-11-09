@@ -7,6 +7,24 @@
   window.__ygaBridgeInstalled = true;
 
   const ORIGIN = location.origin;
+  const PENDING_KEY = "yga:pending-log";
+  const PENDING_MAX = 100;
+
+  function journal(kind, detail) {
+    const text = String(detail == null ? "" : detail);
+    try {
+      window.dispatchEvent(new CustomEvent("yga:journal", {
+        detail: kind + "\u0000" + text
+      }));
+    } catch (e) {}
+    try {
+      const raw = window.sessionStorage.getItem(PENDING_KEY);
+      const entries = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(entries) ? entries : [];
+      list.push({ t: Date.now(), kind: kind, detail: text });
+      window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-PENDING_MAX)));
+    } catch (e) {}
+  }
 
   function txt(t) {
     if (!t) return "";
@@ -310,13 +328,323 @@
       return { channelId: channelId, title: title };
     }
 
+    function apiKind(obj, method) {
+      if (!obj) return "-";
+      if (typeof obj[method] === "function") return "fn";
+      return typeof obj;
+    }
+
+    function keysOf(obj) {
+      try {
+        return obj && typeof obj === "object" ? Object.keys(obj).slice(0, 80).join(",") : "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function keysMatching(obj, re) {
+      try {
+        return obj && typeof obj === "object"
+          ? Object.keys(obj).filter((key) => re.test(key)).slice(0, 80).join(",")
+          : "";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function ytPageManager() {
+      const yt = window.yt;
+      if (!yt || typeof yt !== "object") return null;
+      const names = [
+        "pageManager", "pageManager_", "pageManagerInstance", "pageManagerInstance_",
+        "pageManagerInstanceInstance_", "pageManagerInstanceInstance"
+      ];
+      for (const name of names) {
+        const value = yt[name];
+        if (value && (typeof value === "object" || typeof value === "function")) return value;
+      }
+      return null;
+    }
+
+    function methodKind(obj, methods) {
+      if (!obj) return "-";
+      const parts = methods.filter((method) => typeof obj[method] === "function");
+      return parts.length ? "fn:" + parts.join(",") : typeof obj;
+    }
+
+    function navGlobals() {
+      const out = [];
+      const seen = new Set();
+      const re = /(^|_)(nav|page|spf|history|route|router|endpoint|content|app)|^yt/i;
+      for (const key of Object.getOwnPropertyNames(window)) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!re.test(key)) continue;
+        let value;
+        try {
+          value = window[key];
+        } catch (e) {
+          out.push(key + "=err");
+          continue;
+        }
+        if (typeof value === "function") {
+          out.push(key + "=fn");
+        } else if (value && typeof value === "object") {
+          const kind = methodKind(value, ["navigate", "load", "push", "replace", "go", "dispatch"]);
+          out.push(key + "=" + kind);
+        }
+      }
+      return out;
+    }
+
+    function cmdGetNavApis() {
+      return {
+        ytPageManagerApi: apiKind(window.ytPageManagerApi, "load"),
+        ytPageManagerApiKeys: keysOf(window.ytPageManagerApi),
+        ytspb: apiKind(window.ytspb, "navigate"),
+        ytspbKeys: keysOf(window.ytspb),
+        yt: methodKind(window.yt, ["navigate", "load", "push", "replace", "go", "dispatch"]),
+        ytMethods: methodKind(window.yt, ["navigate", "load", "push", "replace", "go", "dispatch", "setPageData", "setNext"]),
+        ytKeys: keysOf(window.yt),
+        ytNavKeys: keysMatching(window.yt, /page|nav|load|route|command|manager|spf|history|dispatch/i),
+        ytPageManager: methodKind(ytPageManager(), ["navigate", "load", "prefetch", "process", "request"]),
+        ytPageManagerKeys: keysOf(ytPageManager()),
+        ytglobal: methodKind(window.ytglobal, ["navigate", "load", "prefetch", "process", "request"]),
+        ytglobalKeys: keysOf(window.ytglobal),
+        ytCommand: methodKind(window.ytCommand, ["navigate", "load", "request", "process", "dispatch"]),
+        ytCommandKeys: keysMatching(window.ytCommand, /nav|page|load|command|url|endpoint|action/i),
+        ytSignals: methodKind(window.ytSignals, ["navigate", "load", "dispatch"]),
+        spf: methodKind(window.spf, ["navigate", "load", "request", "init", "dispatch", "process"]),
+        spfKeys: keysOf(window.spf),
+        navigation: methodKind(window.navigation, ["navigate", "traverseTo"]),
+        navGlobals: navGlobals()
+      };
+    }
+
+    function safeHref(href) {
+      return typeof href === "string" &&
+        href.length > 1 &&
+        href.length < 2048 &&
+        href.charAt(0) === "/" &&
+        href.charAt(1) !== "/";
+    }
+
+    function anchorSelector(href) {
+      const attr = String(href).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return 'a[href="' + attr + '"]:not([data-yga-row])';
+    }
+
+    function findNativeAnchor(href) {
+      let a = null;
+      try {
+        a = document.querySelector(anchorSelector(href));
+        if (!a) {
+          const attr = String(href).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          a = document.querySelector('a[href$="' + attr + '"]:not([data-yga-row])');
+        }
+        if (a && (a.closest("[data-yga]") || (a.target && a.target !== "_self"))) a = null;
+      } catch (e) {
+        a = null;
+      }
+      return a;
+    }
+
+    function anchorClick(href, from) {
+      if (!document.body) return false;
+      let a = findNativeAnchor(href);
+      let temp = false;
+      if (!a) {
+        a = document.createElement("a");
+        a.href = href;
+        a.className = "spf-link yt-simple-endpoint";
+        a.setAttribute("data-yga-anchor", "1");
+        a.style.display = "none";
+        document.body.appendChild(a);
+        temp = true;
+      }
+
+      const ev = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0
+      });
+      const onFinal = (e) => {
+        if (e !== ev) return;
+        if (!e.defaultPrevented) e.preventDefault();
+      };
+
+      window.addEventListener("click", onFinal, false);
+      try {
+        a.dispatchEvent(ev);
+      } finally {
+        window.removeEventListener("click", onFinal, false);
+        if (temp) a.remove();
+      }
+      // YouTube may intercept the synthetic click asynchronously: it does not
+      // always preventDefault() during dispatch, but yt-navigate-start fires a
+      // tick later. Returning false here made cmdNavigate() fall through before
+      // the successful SPA event could be observed.
+      return true;
+    }
+
+    function spaApis(from) {
+      const apis = [];
+      const w = window;
+      const pm = ytPageManager();
+      const cmd = w.ytCommand;
+
+      if (cmd && typeof cmd.navigate === "function") {
+        const nav = cmd.navigate.bind(cmd);
+        apis.push({ name: "ytcommand-nav-url", run: (href) => nav({ url: href, refer: from }) });
+        apis.push({ name: "ytcommand-nav-args", run: (href) => nav(href, { refer: from }, "content") });
+        apis.push({ name: "ytcommand-nav-url-current", run: (href) => nav({ url: href, current: from }) });
+      }
+      if (cmd && typeof cmd.load === "function") {
+        const load = cmd.load.bind(cmd);
+        apis.push({ name: "ytcommand-load-url", run: (href) => load({ url: href, refer: from }) });
+      }
+      if (w.ytglobal && typeof w.ytglobal.navigate === "function") {
+        const nav = w.ytglobal.navigate.bind(w.ytglobal);
+        apis.push({ name: "ytglobal-nav-refer", run: (href) => nav(href, { refer: from }, "content") });
+        apis.push({ name: "ytglobal-nav-current", run: (href) => nav(href, { current: from }, "content") });
+        apis.push({ name: "ytglobal-nav-url", run: (href) => nav({ url: href, current: from }, null, "content") });
+      }
+      if (w.ytglobal && typeof w.ytglobal.load === "function") {
+        const load = w.ytglobal.load.bind(w.ytglobal);
+        apis.push({ name: "ytglobal-load-refer", run: (href) => load(href, { refer: from }, "content") });
+      }
+      if (w.ytPageManagerApi && typeof w.ytPageManagerApi.load === "function") {
+        const load = w.ytPageManagerApi.load.bind(w.ytPageManagerApi);
+        apis.push({ name: "pma-url", run: (href) => load({ url: href }) });
+      }
+      if (w.ytPageManagerApi && typeof w.ytPageManagerApi.navigate === "function") {
+        const nav = w.ytPageManagerApi.navigate.bind(w.ytPageManagerApi);
+        apis.push({ name: "pma-navigate-url", run: (href) => nav({ url: href }) });
+      }
+      if (w.ytspb && typeof w.ytspb.navigate === "function") {
+        const nav = w.ytspb.navigate.bind(w.ytspb);
+        apis.push({ name: "ytspb", run: (href) => nav(href, { current: from }) });
+      }
+      if (pm && typeof pm.navigate === "function") {
+        const nav = pm.navigate.bind(pm);
+        apis.push({ name: "pm-nav-refer", run: (href) => nav(href, { refer: from }, "content") });
+      }
+      if (w.yt && typeof w.yt.load === "function") {
+        const load = w.yt.load.bind(w.yt);
+        apis.push({ name: "yt-load-url", run: (href) => load({ url: href }) });
+      }
+      apis.push({ name: "anchor-click", wait: 1500, run: (href) => anchorClick(href, from) });
+      return apis;
+    }
+
+    function cmdNavigate(href) {
+      return new Promise((resolve) => {
+        if (!safeHref(href)) {
+          resolve({ ok: false, error: "badHref" });
+          return;
+        }
+        const from = window.location.href;
+        const errors = [];
+        let done = false;
+        let cleanup = () => {};
+        const finish = (res) => {
+          if (done) return;
+          done = true;
+          cleanup();
+          resolve(res);
+        };
+        let eventFired = false;
+        let currentApi = "";
+        const onStart = () => {
+          eventFired = true;
+          journal("page-nav", "event start " + (currentApi || "?") + " " + href);
+          finish({ ok: true, api: currentApi || "event" });
+        };
+        const onFinish = () => {
+          eventFired = true;
+          journal("page-nav", "event finish " + (currentApi || "?") + " " + href);
+          finish({ ok: true, api: currentApi || "event" });
+        };
+        window.addEventListener("yt-navigate-start", onStart, { once: true });
+        window.addEventListener("yt-navigate-finish", onFinish, { once: true });
+        cleanup = () => {
+          window.removeEventListener("yt-navigate-start", onStart);
+          window.removeEventListener("yt-navigate-finish", onFinish);
+        };
+
+        const apis = spaApis(from);
+        journal("page-nav", "start " + href + " apis=" + apis.map((a) => a.name).join(","));
+        function waitApi(api, index) {
+          setTimeout(() => {
+            if (done || eventFired) return;
+            if (window.location.href !== from) {
+              journal("page-nav", "url-no-event " + api.name + " " + href);
+              finish({ ok: false, api: api.name, error: "url-no-event" });
+              return;
+            }
+            journal("page-nav", "noop " + api.name + " " + href);
+            tryApi(index + 1);
+          }, api.wait || 500);
+        }
+        function tryApi(index) {
+          if (done) return;
+          if (eventFired) return;
+          if (index >= apis.length) {
+            journal("page-nav", "none " + href + " errors=" + errors.join(";"));
+            finish({ ok: false, api: "none", errors: errors.join(";"), apis: cmdGetNavApis() });
+            return;
+          }
+          const api = apis[index];
+          currentApi = api.name;
+          journal("page-nav", "try " + api.name + " " + href);
+          try {
+            const ret = api.run(href);
+            if (ret === false) {
+              errors.push(api.name + ":false");
+              journal("page-nav", "false " + api.name + " " + href);
+              tryApi(index + 1);
+              return;
+            }
+            if (ret && typeof ret.then === "function") {
+              ret.then(
+                () => {},
+                (e) => {
+                  errors.push(api.name + ":promise:" + String(e && e.message || e));
+                  journal("page-nav", "promise-err " + api.name + " " + String(e && e.message || e));
+                  if (!done && !eventFired && window.location.href === from) tryApi(index + 1);
+                }
+              );
+            }
+            if (eventFired) return;
+            if (window.location.href !== from) {
+              journal("page-nav", "url-wait " + api.name + " " + href);
+              waitApi(api, index);
+              return;
+            }
+          } catch (e) {
+            errors.push(api.name + ":" + String(e && e.message || e));
+            journal("page-nav", "err " + api.name + " " + String(e && e.message || e));
+            tryApi(index + 1);
+            return;
+          }
+          waitApi(api, index);
+        }
+
+        tryApi(0);
+        setTimeout(() => finish({ ok: false, error: "timeout", apis: cmdGetNavApis() }), 8000);
+      });
+    }
+
     const COMMANDS = {
       getGuideSubscriptions: cmdGetGuideSubscriptions,
       getContext: cmdGetContext,
       browseSubscriptions: cmdBrowseSubscriptions,
       getSubscriptionsPage: cmdGetSubscriptionsPage,
       getAccountInfo: cmdGetAccountInfo,
-      getPageChannel: cmdGetPageChannel
+      getPageChannel: cmdGetPageChannel,
+      getNavApis: cmdGetNavApis,
+      navigate: cmdNavigate
     };
 
     window.addEventListener("message", (event) => {
@@ -327,7 +655,7 @@
       Promise.resolve()
         .then(() => {
           if (!handler) throw new Error("unknown command");
-          return handler();
+          return handler(msg.arg);
         })
         .then(
           (data) => window.postMessage(

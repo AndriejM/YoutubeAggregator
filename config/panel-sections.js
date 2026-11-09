@@ -664,7 +664,12 @@ window.yga = window.yga || {};
       w.position || "afterSubscriptions"
     );
     position.addEventListener("change", async () => {
-      await u.save("widget.position", position.value);
+      // A named position replaces any manual ▲/▼ slot (PLAN.md §8.3). Both
+      // keys must land in one emit, or the widget remounts twice.
+      await yga.profiles.saveSettingsPaths({
+        "widget.position": position.value,
+        "widget.guideIndex": null
+      });
     });
     host.appendChild(u.field("widgetPosition", position, "widgetPositionHint"));
 

@@ -16,7 +16,12 @@ window.yga = window.yga || {};
     return `${buf[0].toString(16)}-${buf[1].toString(16)}-${++seq}`;
   }
 
-  function call(cmd, timeoutMs) {
+  function call(cmd, arg, timeoutMs) {
+    // Older callers use call(cmd, timeoutMs); keep that shape working.
+    if (typeof arg === "number") {
+      timeoutMs = arg;
+      arg = undefined;
+    }
     return new Promise((resolve, reject) => {
       const nonce = newNonce();
       const timer = setTimeout(() => {
@@ -30,7 +35,7 @@ window.yga = window.yga || {};
       });
 
       window.postMessage(
-        { __yga: "cmd", id: nonce, nonce: nonce, cmd: cmd },
+        { __yga: "cmd", id: nonce, nonce: nonce, cmd: cmd, arg: arg },
         window.location.origin
       );
     });

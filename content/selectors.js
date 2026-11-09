@@ -9,6 +9,9 @@ window.yga = window.yga || {};
     app: ["ytd-app"],
     drawer: ["tp-yt-app-drawer", "ytd-guide-entry-renderer"],
     guideRoot: ["#guide-inner-content", "ytd-guide-renderer", "#guide"],
+    // The Polymer-managed guide subtree — the widget must stay outside it
+    // (ytd-guide-renderer re-renders its own children, see widget.js).
+    guideRenderer: ["ytd-guide-renderer", "#guide-inner-content #sections", "#sections"],
     guideSections: [
       "#guide-inner-content #sections",
       "ytd-guide-renderer #sections",
@@ -51,6 +54,42 @@ window.yga = window.yga || {};
   let logQueue = [];
   let flushTimer = 0;
 
+  // chrome.storage.local.set() is async and a full navigation kills the page
+  // before it resolves — that ate every row-click breadcrumb. sessionStorage
+  // is synchronous and survives reloads in the same tab, so the breadcrumb
+  // written just before the reload is drained by the next document.
+  const PENDING_KEY = "yga:pending-log";
+
+  function readPending() {
+    try {
+      const raw = window.sessionStorage.getItem(PENDING_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writePending(entries) {
+    try {
+      window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(entries.slice(-LOG_MAX)));
+    } catch (e) {
+      // sessionStorage unavailable (unit harness, quota).
+    }
+  }
+
+  function appendPending(entry) {
+    const entries = readPending();
+    entries.push(entry);
+    writePending(entries);
+  }
+
+  function clearPending() {
+    try {
+      window.sessionStorage.removeItem(PENDING_KEY);
+    } catch (e) {}
+  }
+
   async function flushLog() {
     flushTimer = 0;
     if (!logQueue.length) return;
@@ -61,18 +100,59 @@ window.yga = window.yga || {};
       const prev = Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
       const next = prev.concat(entries).slice(-LOG_MAX);
       await chrome.storage.local.set({ [LOG_KEY]: next });
+      clearPending();
     } catch (e) {
       // Storage unavailable (unit harness without chrome, incognito limits).
       console.debug("[yga] journal flush failed:", e);
     }
   }
 
-  function journal(kind, detail) {
-    logQueue.push({ t: Date.now(), kind: kind, detail: detail });
+  function enqueue(kind, detail, persist) {
+    const entry = { t: Date.now(), kind: kind, detail: detail };
+    logQueue.push(entry);
+    if (persist) appendPending(entry);
     if (!flushTimer) {
       flushTimer = setTimeout(flushLog, LOG_FLUSH_MS);
       if (flushTimer && typeof flushTimer.unref === "function") flushTimer.unref();
     }
+  }
+
+  function journal(kind, detail) {
+    enqueue(kind, detail, true);
+  }
+
+  // Restored entries are re-persisted so a second navigation before the
+  // chrome.storage flush cannot lose them again.
+  function drainPending() {
+    const entries = readPending();
+    if (!entries.length) return;
+    clearPending();
+    for (const entry of entries) {
+      if (!entry || typeof entry.kind !== "string") continue;
+      journal(entry.kind, String(entry.detail == null ? "" : entry.detail));
+    }
+  }
+
+  // A full navigation unloads the page before the 1s debounce fires, which
+  // silently ate the row-click entry right before the reload it was meant to
+  // prove. Flush synchronously-enough on pagehide so the breadcrumb survives.
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("pagehide", () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = 0;
+      }
+      flushLog();
+    });
+
+    window.addEventListener("yga:journal", (ev) => {
+      const text = typeof ev.detail === "string" ? ev.detail : "";
+      const sep = text.indexOf("\u0000");
+      if (sep < 0) return;
+      const kind = text.slice(0, sep);
+      if (!kind) return;
+      enqueue(kind, text.slice(sep + 1), false);
+    });
   }
 
   yga.selectors = {
@@ -97,6 +177,7 @@ window.yga = window.yga || {};
     },
 
     // Shared journal for other failure telemetry (mount timeout, bridge loss).
-    journal: journal
+    journal: journal,
+    drainPending: drainPending
   };
 })(window.yga);

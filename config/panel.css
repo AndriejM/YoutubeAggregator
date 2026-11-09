@@ -319,6 +319,13 @@
   max-width: 320px;
 }
 
+/* YT-override: Chrome paints native popup rows from the <option>, not the
+   panel theme — without this the option list is white on white in dark mode. */
+.yga-panel-select option {
+  color: var(--yga-fg);
+  background: var(--yga-surface);
+}
+
 .yga-panel-num {
   max-width: 96px;
 }

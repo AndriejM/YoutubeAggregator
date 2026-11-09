@@ -114,16 +114,32 @@ window.yga = window.yga || {};
     return settings;
   }
 
-  // Write one nested field ("widget.widthPx", "refresh.scheduled.enabled").
-  async function saveSettingsPath(path, value) {
-    const next = cloneSettings(await loadSettings());
+  function setPath(target, path, value) {
     const parts = String(path).split(".");
-    let node = next;
+    let node = target;
     for (let i = 0; i < parts.length - 1; i++) {
       if (typeof node[parts[i]] !== "object" || node[parts[i]] === null) node[parts[i]] = {};
       node = node[parts[i]];
     }
     node[parts[parts.length - 1]] = value;
+  }
+
+  // Write one nested field ("widget.widthPx", "refresh.scheduled.enabled").
+  async function saveSettingsPath(path, value) {
+    const next = cloneSettings(await loadSettings());
+    setPath(next, path, value);
+    settings = next;
+    scheduleSettingsWrite();
+    emitSettings();
+    return next;
+  }
+
+  // Several nested fields as a single edit: one clone, one debounced write,
+  // one emit. Needed when two settings must land together (PLAN.md §8.3: a
+  // named position replaces the manual ▲/▼ slot).
+  async function saveSettingsPaths(pairs) {
+    const next = cloneSettings(await loadSettings());
+    for (const path in pairs) setPath(next, path, pairs[path]);
     settings = next;
     scheduleSettingsWrite();
     emitSettings();
@@ -198,6 +214,11 @@ window.yga = window.yga || {};
     // Inline edit of one nested field (config panel, stage 4).
     async saveSettingsPath(path, value) {
       return saveSettingsPath(path, value);
+    },
+
+    // Atomic multi-field edit (PLAN.md §8.3).
+    async saveSettingsPaths(pairs) {
+      return saveSettingsPaths(pairs);
     },
 
     defaults() {

@@ -261,6 +261,54 @@ class IntersectionObserver {
   disconnect() {}
 }
 
+// MutationObserver stand-in for the bootstrap remount test: records are only
+// queued for subtrees under an observed root; flushMutations() delivers them.
+const liveObservers = [];
+let mutationQueue = [];
+class MutationObserver {
+  constructor(cb) { this.cb = cb; }
+  observe(root) { liveObservers.push({ obs: this, root }); }
+  disconnect() {
+    for (let i = liveObservers.length - 1; i >= 0; i--) {
+      if (liveObservers[i].obs === this) liveObservers.splice(i, 1);
+    }
+  }
+}
+function underObserved(node) {
+  let n = node;
+  while (n) {
+    for (const entry of liveObservers) if (entry.root === n) return true;
+    n = n.parentNode;
+  }
+  return false;
+}
+function recordMutation(node, oldParent) {
+  if (underObserved(node) || underObserved(oldParent)) mutationQueue.push(node);
+}
+{
+  const origAppend = Element.prototype.appendChild;
+  const origRemove = Element.prototype.removeChild;
+  Element.prototype.appendChild = function (node) {
+    const res = origAppend.call(this, node);
+    recordMutation(node, null);
+    return res;
+  };
+  Element.prototype.removeChild = function (node) {
+    const oldParent = node.parentNode;
+    const res = origRemove.call(this, node);
+    recordMutation(node, oldParent);
+    return res;
+  };
+}
+function flushMutations() {
+  const records = mutationQueue;
+  mutationQueue = [];
+  if (!records.length) return;
+  for (const entry of liveObservers.slice()) {
+    if (records.some((r) => entry.root.contains(r))) entry.obs.cb(records, entry.obs);
+  }
+}
+
 // --- content world over the real worker ---------------------------------
 
 const env = makeSandbox();
@@ -390,6 +438,13 @@ env.sandbox.chrome.storage.local
     const row = widget.querySelector('[data-yga-row="' + CH1 + '"]');
     const chip = () => row.querySelector(".yga-count");
     check("dom: row rendered", !!row);
+    // YouTube's spf.js only claims a click when a .spf-link ancestor exists;
+    // without it the browser does a real page load (the "channel click reloads
+    // YouTube" bug). See content/widget.js rowNode.
+    check(
+      "dom: channel row carries spf-link so YouTube SPA-navigates it",
+      !!row && row.classList.contains("spf-link") && row.classList.contains("yt-simple-endpoint")
+    );
     check("dom: 16 new videos show as 15+", chip().textContent === "15+", JSON.stringify(chip().textContent));
 
     // PLAN.md §10.5: right-click = "mark as watched" until the stage-4 panel.
@@ -451,6 +506,13 @@ env.sandbox.chrome.storage.local
       "panel: widget mounted in the guide",
       !!mounted && mounted.parentNode === guide,
       JSON.stringify(mounted && mounted.parentNode && mounted.parentNode.id)
+    );
+    // ytd-guide-renderer re-renders its own subtree when a foreign child is
+    // inserted there — that removed the widget and flickered the sidebar on
+    // every navigation. The widget must live beside the managed subtree.
+    check(
+      "mount: widget stays outside the Polymer-managed guide subtree",
+      !!mounted && !sections.contains(mounted) && mounted.parentNode === guide
     );
 
     const gear = mounted && mounted.querySelector(".yga-config-btn");
@@ -630,6 +692,125 @@ env.sandbox.chrome.storage.local
       !!pseudo &&
         pseudo.querySelector(".yga-group-name").textContent === "groupNone" &&
         !!pseudo.querySelector('[data-yga-row="' + CH1 + '"]')
+    );
+
+    // --- incremental render (PLAN.md §18.3) --------------------------------
+    // A re-render of an unchanged tree must not rebuild the sidebar: the same
+    // nodes have to survive, otherwise every navigation flickers the guide.
+    const wrapBefore = mounted.querySelector('[data-yga-group="none"]');
+    const rowBefore = mounted.querySelector('[data-yga-row="' + CH1 + '"]');
+    await yga.state.refreshVisible();
+    await flush(20);
+    check(
+      "render: unchanged group keeps its DOM node instead of rebuilding (§18.3)",
+      !!wrapBefore &&
+        mounted.querySelector('[data-yga-group="none"]') === wrapBefore &&
+        mounted.querySelector('[data-yga-row="' + CH1 + '"]') === rowBefore
+    );
+
+    // --- widget guide slot (PLAN.md §8.3) ----------------------------------
+    const host = mounted.parentNode;
+    host.appendChild(document.createElement("div"));
+    host.appendChild(document.createElement("div"));
+    const slotOf = () => host.children.indexOf(mounted);
+
+    const moveUp = mounted.querySelector(".yga-move-up");
+    const moveDown = mounted.querySelector(".yga-move-down");
+    check("slot: footer move buttons rendered (§8.3)", !!moveUp && !!moveDown);
+    check("slot: widget sits after the guide renderer", slotOf() === 1, String(slotOf()));
+
+    moveDown.dispatchEvent({ type: "click" });
+    await flush(20);
+    check("slot: ▼ rehangs the widget one slot down (§8.3)", slotOf() === 2, String(slotOf()));
+    await new Promise((r) => setTimeout(r, 400)); // §5 write debounce
+    const slotStored = await chrome.storage.local.get("yga:settings");
+    const savedWidget = (slotStored["yga:settings"] || {}).widget || {};
+    check(
+      "slot: the slot is persisted to widget.guideIndex",
+      savedWidget.guideIndex === 2,
+      JSON.stringify(savedWidget)
+    );
+
+    moveUp.dispatchEvent({ type: "click" });
+    await flush(20);
+    moveUp.dispatchEvent({ type: "click" });
+    await flush(20);
+    check("slot: ▲ rehangs the widget back to the first slot", slotOf() === 0, String(slotOf()));
+    check("slot: ▲ is disabled at the top", !!moveUp.disabled);
+
+    // The slot must survive the SPA remounts YouTube forces on guide rebuilds.
+    mounted.remove();
+    const remounted = yga.mountWidget();
+    check(
+      "slot: remount honours the stored guideIndex (§8.3)",
+      !!remounted && host.children.indexOf(remounted) === 0,
+      String(host.children.indexOf(remounted))
+    );
+
+    // The panel's named position select replaces a manual slot.
+    await yga.profiles.saveSettingsPaths({
+      "widget.position": "afterSubscriptions",
+      "widget.guideIndex": null
+    });
+    await flush(20);
+    const back = document.querySelector('[data-yga="widget"]');
+    check(
+      "slot: clearing guideIndex returns to the named position",
+      !!back && host.children.indexOf(back) === 1,
+      String(host.children.indexOf(back))
+    );
+
+    // --- combobox contrast (white-on-white regression guard) ---------------
+    const css = read("content/widget.css");
+    check(
+      "combobox: the select paints a solid surface, not transparent",
+      /\.yga-profile-select\s*\{[^}]*background:\s*var\(--yga-surface\)/.test(css),
+      "no surface on .yga-profile-select"
+    );
+    check(
+      "combobox: option rows follow the widget theme",
+      /\.yga-profile-select option\s*\{[^}]*background:\s*var\(--yga-surface\)/.test(css),
+      "no themed option background"
+    );
+
+    // --- guide rebuild after SPA navigation (bootstrap remount) ------------
+    // SPF navigation can replace the guide after yt-navigate-finish has fired;
+    // the widget must come back with the new guide instead of vanishing.
+    globalThis.MutationObserver = MutationObserver;
+    vm.runInThisContext(read("content/bootstrap.js"), { filename: "bootstrap.js" });
+
+    const oldGuide = app.querySelector("#guide-inner-content");
+    const newGuide = document.createElement("div");
+    newGuide.setAttribute("id", "guide-inner-content");
+    const newSections = document.createElement("div");
+    newSections.setAttribute("id", "sections");
+    const newSubLink = document.createElement("a");
+    newSubLink.setAttribute("href", "/feed/subscriptions");
+    newSections.appendChild(newSubLink);
+    newGuide.appendChild(newSections);
+
+    oldGuide.remove();
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(20);
+    check(
+      "rebuild: widget stays gone while the guide is still missing",
+      !document.querySelector('[data-yga="widget"]')
+    );
+
+    app.appendChild(newGuide);
+    flushMutations();
+    await flush(20);
+    const remountedAfterRebuild = document.querySelector('[data-yga="widget"]');
+    check(
+      "rebuild: widget remounts once the rebuilt guide lands (§8.2)",
+      !!remountedAfterRebuild && newGuide.contains(remountedAfterRebuild),
+      JSON.stringify(remountedAfterRebuild && remountedAfterRebuild.parentNode && remountedAfterRebuild.parentNode.id)
+    );
+    check(
+      "rebuild: remounted widget stays outside the new managed subtree",
+      !!remountedAfterRebuild &&
+        !newSections.contains(remountedAfterRebuild) &&
+        remountedAfterRebuild.parentNode === newGuide
     );
 
     // Stage 6: "broken" telemetry — selector misses land in the yga:log journal.
