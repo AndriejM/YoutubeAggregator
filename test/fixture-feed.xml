@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="http://schemas.google.com/g/2005#feed" type="application/atom+xml" href="https://www.youtube.com/feeds/videos.xml?channel_id=UC001"/>
+ <link rel="alternate" type="text/html" href="https://www.youtube.com/channel/UC001"/>
+ <title>RSS Test Channel &amp; Co.</title>
+ <id>yt:channel:001</id>
+ <updated>2026-11-08T10:00:00.000Z</updated>
+ <author>
+  <name>RSS Test Channel &amp; Co.</name>
+  <uri>https://www.youtube.com/channel/UC001</uri>
+ </author>
+ <yt:channelId>UCtestchannel0000000000A</yt:channelId>
+ <entry>
+  <title><![CDATA[New & "bold" <video> #1 — entities]]></title>
+  <link rel="alternate" type="text/html" href="https://www.youtube.com/watch?v=aaa11111111"/>
+  <id>yt:video:aaa11111111</id>
+  <yt:videoId>aaa11111111</yt:videoId>
+  <yt:channelId>UCtestchannel0000000000A</yt:channelId>
+  <published>2026-11-08T09:00:00.000Z</published>
+  <updated>2026-11-08T09:00:00.000Z</updated>
+  <category scheme="https://www.youtube.com/2007/g#terminal-category"/>
+  <media:group>
+   <media:title>New &quot;bold&quot; &lt;video&gt; #1 — entities</media:title>
+   <media:content url="https://www.youtube.com/v/aaa11111111?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:player url="https://www.youtube.com/watch?v=aaa11111111"/>
+   <media:thumbnail url="https://i.ytimg.com/vi/aaa11111111/hqdefault.jpg" height="360" width="480"/>
+   <media:thumbnail url="https://yt3.ggpht.com/avatar=s160-c-k-c0x00ffffff-no-rj" height="1" width="1"/>
+   <media:community media:starRating="0.0" media:ratingCount="0" media:statistics="views=1234 ratings=5"/>
+  </media:group>
+ </entry>
+ <entry>
+  <title>Second video &amp;amp; more</title>
+  <link rel="alternate" type="text/html" href="https://www.youtube.com/watch?v=bbb22222222"/>
+  <id>yt:video:bbb22222222</id>
+  <yt:videoId>bbb22222222</yt:videoId>
+  <yt:channelId>UCtestchannel0000000000A</yt:channelId>
+  <published>2026-11-07T09:00:00.000Z</published>
+  <updated>2026-11-07T09:00:00.000Z</updated>
+  <media:group>
+   <media:title>Second video &amp; more</media:title>
+   <media:thumbnail url="https://i.ytimg.com/vi/bbb22222222/hqdefault.jpg" height="360" width="480"/>
+   <media:thumbnail url="https://yt3.ggpht.com/avatar2=s160" height="1" width="1"/>
+   <media:community media:statistics="views=99 ratings=1"/>
+  </media:group>
+ </entry>
+ <entry>
+  <title>Old video</title>
+  <link rel="alternate" type="text/html" href="https://www.youtube.com/watch?v=ccc33333333"/>
+  <id>yt:video:ccc33333333</id>
+  <yt:videoId>ccc33333333</yt:videoId>
+  <yt:channelId>UCtestchannel0000000000A</yt:channelId>
+  <published>2026-11-01T09:00:00.000Z</published>
+  <updated>2026-11-01T09:00:00.000Z</updated>
+  <media:group>
+   <media:title>Old video</media:title>
+   <media:thumbnail url="https://i.ytimg.com/vi/ccc33333333/hqdefault.jpg" height="360" width="480"/>
+   <media:thumbnail url="https://yt3.ggpht.com/avatar3=s160" height="1" width="1"/>
+   <media:community media:statistics="views=7 ratings=0"/>
+  </media:group>
+ </entry>
+</feed>

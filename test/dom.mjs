@@ -1,0 +1,358 @@
+// Widget DOM harness (no browser, no deps): runs the real content scripts
+// (state.js, profiles.js, counters.js, widget.js) against a minimal DOM and
+// the real service worker from harness.mjs. Covers what logic.mjs cannot:
+// row painting, the contextmenu "mark as watched" entry and applyCounts.
+// Run: node test/dom.mjs — exit code 0 = all checks pass.
+import vm from "node:vm";
+import {
+  read, CH1, check, report, failures, flush, makeSandbox, loadInto, feedWith
+} from "./harness.mjs";
+
+// --- minimal DOM ---------------------------------------------------------
+
+function parseSimple(s) {
+  const sel = { tag: null, cls: [], attr: [] };
+  const re = /([.#]?)([A-Za-z0-9_-]+)|\[([A-Za-z0-9_-]+)(?:="([^"]*)")?\]/g;
+  let m;
+  while ((m = re.exec(s))) {
+    if (m[3]) sel.attr.push({ name: m[3], value: m[4] });
+    else if (m[1] === ".") sel.cls.push(m[2]);
+    else if (m[1] === "#") sel.attr.push({ name: "id", value: m[2] });
+    else sel.tag = m[2].toLowerCase();
+  }
+  return sel;
+}
+
+function matches(node, sel) {
+  if (!node.tagName) return false;
+  if (sel.tag && node.tagName.toLowerCase() !== sel.tag) return false;
+  for (const c of sel.cls) if (!node.classList.contains(c)) return false;
+  for (const a of sel.attr) {
+    const v = node.getAttribute(a.name);
+    if (v === null) return false;
+    if (a.value !== undefined && v !== a.value) return false;
+  }
+  return true;
+}
+
+class TextNode {
+  constructor(text) { this._text = text; this.parentNode = null; this.isText = true; }
+  get textContent() { return this._text; }
+  set textContent(v) { this._text = String(v); }
+  remove() { if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); }
+}
+
+class Element {
+  constructor(tag) {
+    this.tagName = String(tag).toUpperCase();
+    this.children = [];
+    this.attrs = Object.create(null);
+    this.dataset = Object.create(null);
+    this._text = "";
+    this._listeners = Object.create(null);
+    this.className = "";
+    this.parentNode = null;
+    const self = this;
+    this.classList = {
+      add(...c) { self._cls(new Set([...self._cls(), ...c])); },
+      remove(...c) { const s = new Set(self._cls()); for (const x of c) s.delete(x); self._cls(s); },
+      contains(c) { return self._cls().includes(c); },
+      toggle(c, force) {
+        const has = self.classList.contains(c);
+        const on = force === undefined ? !has : !!force;
+        if (on) self.classList.add(c); else self.classList.remove(c);
+        return on;
+      }
+    };
+  }
+  _cls(set) {
+    if (set) { this.className = Array.from(set).join(" "); return this.className; }
+    return this.className ? this.className.split(/\s+/).filter(Boolean) : [];
+  }
+  get isConnected() {
+    let n = this;
+    while (n.parentNode) n = n.parentNode;
+    return !!n.isRoot;
+  }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+  hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); }
+  removeAttribute(k) { delete this.attrs[k]; }
+  set innerHTML(v) { this._html = v; } // static SVG markup only — never parsed here
+  get innerHTML() { return this._html || ""; }
+  get textContent() {
+    if (this.children.length) return this.children.map((c) => c.textContent).join("");
+    return this._text;
+  }
+  set textContent(v) { this.children = []; this._text = String(v); }
+  appendChild(node) {
+    if (node.isFragment) { for (const c of node.children.slice()) this.appendChild(c); return node; }
+    if (node.parentNode) node.parentNode.removeChild(node);
+    node.parentNode = this;
+    this.children.push(node);
+    return node;
+  }
+  insertBefore(node, ref) {
+    const i = this.children.indexOf(ref);
+    if (node.parentNode) node.parentNode.removeChild(node);
+    node.parentNode = this;
+    this.children.splice(i < 0 ? this.children.length : i, 0, node);
+    return node;
+  }
+  insertAdjacentElement(where, node) {
+    if (where === "afterend" && this.parentNode) this.parentNode.insertBefore(node, this.nextSibling);
+    else this.appendChild(node);
+    return node;
+  }
+  get nextSibling() {
+    const p = this.parentNode;
+    if (!p) return null;
+    return p.children[p.children.indexOf(this) + 1] || null;
+  }
+  removeChild(node) {
+    const i = this.children.indexOf(node);
+    if (i >= 0) this.children.splice(i, 1);
+    node.parentNode = null;
+    return node;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  contains(other) {
+    let n = other;
+    while (n) { if (n === this) return true; n = n.parentNode; }
+    return false;
+  }
+  closest(sel) {
+    const parsed = parseSimple(sel);
+    let n = this;
+    while (n && n.tagName) { if (matches(n, parsed)) return n; n = n.parentNode; }
+    return null;
+  }
+  _query(sel, all) {
+    const out = [];
+    for (const group of String(sel).split(",")) {
+      const parts = group.trim().split(/\s+/).filter(Boolean).map(parseSimple);
+      let level = [this];
+      for (const part of parts) {
+        const next = [];
+        for (const ctx of level) {
+          for (const child of ctx.children) {
+            if (child.isText) continue;
+            if (matches(child, part) && !next.includes(child)) next.push(child);
+            collect(child, part, next);
+          }
+        }
+        level = next;
+      }
+      for (const n of level) if (all ? !out.includes(n) : !out.length) out.push(n);
+    }
+    return all ? out : out[0] || null;
+  }
+  querySelector(sel) { return this._query(sel, false); }
+  querySelectorAll(sel) { return this._query(sel, true); }
+  addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); }
+  removeEventListener(type, fn) {
+    const a = this._listeners[type] || [];
+    const i = a.indexOf(fn);
+    if (i >= 0) a.splice(i, 1);
+  }
+  dispatchEvent(ev) {
+    ev.target = ev.target || this;
+    let n = this;
+    while (n) {
+      ev.currentTarget = n;
+      for (const fn of (n._listeners && n._listeners[ev.type]) || []) fn.call(n, ev);
+      n = n.parentNode;
+    }
+    return !ev.defaultPrevented;
+  }
+}
+
+function collect(node, sel, out) {
+  for (const child of node.children) {
+    if (child.isText) continue;
+    if (matches(child, sel) && !out.includes(child)) out.push(child);
+    collect(child, sel, out);
+  }
+}
+
+const document = {
+  isRoot: true,
+  createElement: (tag) => new Element(tag),
+  createDocumentFragment: () => { const f = new Element("#fragment"); f.isFragment = true; return f; },
+  createTextNode: (t) => new TextNode(t),
+  querySelector: (sel) => root.querySelector(sel),
+  querySelectorAll: (sel) => root.querySelectorAll(sel),
+  addEventListener() {},
+  readyState: "complete"
+};
+const root = new Element("#document");
+root.isRoot = true;
+root.parentNode = null;
+document.body = root;
+
+class IntersectionObserver {
+  constructor() {}
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+// --- content world over the real worker ---------------------------------
+
+const env = makeSandbox();
+loadInto(env);
+env.setResponder(() => ({ status: 200, body: feedWith(16), etag: "etag-dom" }));
+
+const shared = env.storage;
+const content = { storageChanged: [], message: [] };
+const changes = [];
+
+const wsend = env.sandbox.chrome.runtime.sendMessage;
+env.sandbox.chrome.runtime.sendMessage = async (msg) => {
+  content.message.push(msg);
+  return wsend(msg);
+};
+const wlocal = env.sandbox.chrome.storage.local;
+const wset = wlocal.set;
+wlocal.set = async function (payload) {
+  for (const k in payload) {
+    const old = shared.has(k) ? JSON.parse(JSON.stringify(shared.get(k))) : undefined;
+    await wset({ [k]: payload[k] });
+    changes.push({ key: k, oldValue: old, newValue: JSON.parse(JSON.stringify(shared.get(k))) });
+  }
+};
+
+globalThis.window = globalThis;
+globalThis.document = document;
+globalThis.IntersectionObserver = IntersectionObserver;
+globalThis.chrome = {
+  storage: {
+    local: {
+      get: async (keys) => {
+        const out = {};
+        const list =
+          keys === undefined ? Array.from(shared.keys())
+          : typeof keys === "string" ? [keys]
+          : Array.isArray(keys) ? keys
+          : Object.keys(keys);
+        for (const k of list) if (shared.has(k)) out[k] = JSON.parse(JSON.stringify(shared.get(k)));
+        return out;
+      },
+      set: async (payload) => {
+        for (const k in payload) {
+          const old = shared.has(k) ? JSON.parse(JSON.stringify(shared.get(k))) : undefined;
+          shared.set(k, JSON.parse(JSON.stringify(payload[k])));
+          changes.push({ key: k, oldValue: old, newValue: JSON.parse(JSON.stringify(shared.get(k))) });
+        }
+      },
+      remove: async (key) => {
+        for (const k of typeof key === "string" ? [key] : key) shared.delete(k);
+      }
+    },
+    onChanged: { addListener: (fn) => content.storageChanged.push(fn) }
+  },
+  runtime: {
+    onMessage: { addListener: (fn) => content.message.push(fn) },
+    sendMessage: async (msg) => env.send(msg),
+    getURL: (p) => "chrome-extension://test/" + p
+  },
+  i18n: { getMessage: (k) => k }
+};
+
+async function deliver() {
+  await flush(40);
+  while (changes.length) {
+    const batch = changes.splice(0, changes.length);
+    const payload = {};
+    for (const c of batch) payload[c.key] = { oldValue: c.oldValue, newValue: c.newValue };
+    for (const fn of content.storageChanged) fn(payload, "local");
+    await flush(40);
+  }
+}
+
+for (const f of ["content/state.js", "content/profiles.js", "content/counters.js", "content/widget.js"]) {
+  vm.runInThisContext(read(f), { filename: f });
+}
+
+const yga = globalThis.yga;
+yga.i18n = (k) => k;
+// bootstrap.js wires subs→render; the harness mirrors it so a profile switch
+// repaints rows the same way the widget does in the browser.
+yga.state.onSubsChanged((subs) => yga.widget.render(subs));
+
+// --- scenario: 16 new videos, right-click must clear the chip ------------
+
+const widget = document.createElement("div");
+widget.className = "yga-widget";
+widget.setAttribute("data-yga", "widget");
+const listHost = document.createElement("div");
+listHost.className = "yga-list";
+widget.appendChild(listHost);
+root.appendChild(widget);
+
+env.sandbox.chrome.storage.local
+  .set({
+    "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One", a: "" }],
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+  })
+  .then(async () => {
+    await env.send({ type: "counters:refresh", profileId: "p_1" });
+    await flush(40);
+
+    await yga.profiles.load();
+    const pid = await yga.profiles.activeProfileId();
+    await yga.state.setAccountKey("UCme");
+    const init = await env.send({ type: "counters:init", profileId: "p_1" });
+    yga.state.applyInitSnapshot(init.counts, init.aggregate, init.aggregateSeq);
+
+    const subs = await yga.state.getVisibleSubs();
+    yga.widget.render(subs);
+    yga.counters.wire(widget);
+
+    const row = widget.querySelector('[data-yga-row="' + CH1 + '"]');
+    const chip = () => row.querySelector(".yga-count");
+    check("dom: row rendered", !!row);
+    check("dom: 16 new videos show as 15+", chip().textContent === "15+", JSON.stringify(chip().textContent));
+
+    // PLAN.md §10.5: right-click = "mark as watched" until the stage-4 panel.
+    const ev = { type: "contextmenu", ctrlKey: false, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    row.dispatchEvent(ev);
+    check("dom: contextmenu default prevented", ev.defaultPrevented);
+    await flush(20);
+
+    check(
+      "dom: right-click clears the chip immediately",
+      chip().textContent === "" && chip().classList.contains("yga-hidden"),
+      JSON.stringify(chip().textContent)
+    );
+
+    await deliver();
+    check(
+      "dom: chip stays cleared after storage/bus converge",
+      chip().textContent === "" && chip().classList.contains("yga-hidden"),
+      JSON.stringify(chip().textContent)
+    );
+    const total = widget.querySelector(".yga-total");
+    check("dom: footer chip follows", !total || total.textContent === "" || total.classList.contains("yga-hidden"), JSON.stringify(total && total.textContent));
+
+    // A second profile keeps its own view (PLAN.md §5) — the row repaints.
+    const p2 = await yga.profiles.create("Curated");
+    await yga.profiles.addChannel(p2.id, CH1);
+    await yga.profiles.setActiveProfile(p2.id);
+    await yga.state.refreshVisible();
+    await flush(20);
+    const row2 = widget.querySelector('[data-yga-row="' + CH1 + '"]');
+    check(
+      "dom: other profile still counts 15+",
+      !!row2 && row2.querySelector(".yga-count").textContent === "15+",
+      JSON.stringify(row2 && row2.querySelector(".yga-count").textContent)
+    );
+
+    report();
+  })
+  .catch((e) => {
+    failures.push("dom section crashed: " + e);
+    report();
+  });

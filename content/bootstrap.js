@@ -8,6 +8,25 @@
   let timeoutId = 0;
   let refreshing = false;
   let accountReady = false;
+  let countersInit = false;
+
+  // Counters lifecycle (PLAN.md §10): counters:init pulls the cached counts
+  // into the content world, then a non-forced refresh — the worker applies
+  // minIntervalMs itself, so repeated page loads are cheap.
+  async function ensureCounters() {
+    if (!yga.state) return;
+    try {
+      if (!countersInit) {
+        const id = yga.profiles ? await yga.profiles.activeProfileId() : "p_1";
+        const res = await chrome.runtime.sendMessage({ type: "counters:init", profileId: id });
+        countersInit = !!(res && res.ok);
+        if (countersInit) yga.state.applyInitSnapshot(res.counts, res.aggregate, res.aggregateSeq);
+      }
+      yga.state.refreshCounters();
+    } catch (e) {
+      console.debug("[yga] counters init failed:", e);
+    }
+  }
 
   function observerStop() {
     if (observer) {
@@ -24,6 +43,7 @@
     const widget = yga.mountWidget();
     if (widget) {
       observerStop();
+      ensureCounters();
       return true;
     }
     return false;
@@ -60,7 +80,10 @@
         accountReady = true; // later retries become no-ops
       }
       const rekeyed = await yga.state.setAccountKey(acc && acc.accountKey);
-      if (rekeyed) yga.widget.refresh(); // catalog-scoped UI (picker) must reload
+      if (rekeyed) {
+        yga.widget.refresh(); // catalog-scoped UI (picker) must reload
+        ensureCounters(); // the worker's catalog key followed the account
+      }
     } catch (e) {
       console.debug("[yga] account detection failed:", e);
     }
@@ -90,6 +113,7 @@
       if (!document.querySelector('[data-yga="widget"]')) {
         if (ensureMounted()) return; // fresh widget already re-rendered from cache
       }
+      ensureCounters(); // cheap freshness gate; only stale channels are fetched
       refreshSubscriptions(); // cheap guide read; only writes storage on change
     });
   }

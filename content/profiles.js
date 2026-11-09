@@ -10,7 +10,29 @@ window.yga = window.yga || {};
   const BUILTIN_ID = "p_1";
 
   let profiles = null; // id -> profile
+  let lastActive = null; // active profile id seen by this world (widget/footer fast path)
   const profileListeners = new Set();
+  const compositionMirrors = new Map(); // profileId -> last known comp object (cross-tab adopt)
+
+  // The single writer of yga:profile-channels:<id> (stage 3). state.js bridges
+  // storage.onChanged from OTHER contexts into these mirrors (adopt), so reads
+  // here never serve a stale composition after another tab edited it.
+  function readComposition(id) {
+    const mirror = compositionMirrors.get(id);
+    if (mirror) return Promise.resolve(mirror);
+    return chrome.storage.local.get(compositionKey(id)).then(function (stored) {
+      const comp = stored[compositionKey(id)] || {};
+      compositionMirrors.set(id, comp);
+      return comp;
+    });
+  }
+
+  function writeComposition(id, comp) {
+    compositionMirrors.set(id, comp);
+    const payload = {};
+    payload[compositionKey(id)] = comp;
+    return chrome.storage.local.set(payload);
+  }
 
   function now() {
     return Date.now();
@@ -109,7 +131,14 @@ window.yga = window.yga || {};
       const settings = await loadSettings();
       const id = settings.activeProfileId;
       await this.load();
-      return profiles[id] ? id : BUILTIN_ID;
+      lastActive = profiles[id] ? id : BUILTIN_ID;
+      return lastActive;
+    },
+
+    // Synchronous fast path for render paths inside the same world (widget
+    // decorate); null until activeProfileId() has resolved at least once.
+    lastActiveId() {
+      return lastActive;
     },
 
     async setActiveProfile(id) {
@@ -149,9 +178,7 @@ window.yga = window.yga || {};
         includeAllSubs: false
       };
       await persistProfiles();
-      const payload = {};
-      payload[compositionKey(id)] = {};
-      await chrome.storage.local.set(payload);
+      await writeComposition(id, {});
       return profiles[id];
     },
 
@@ -166,6 +193,7 @@ window.yga = window.yga || {};
       if (!again) return false;
       delete profiles[id];
       await persistProfiles();
+      compositionMirrors.delete(id);
       await chrome.storage.local.remove(compositionKey(id));
       const settings = await loadSettings();
       if (settings.activeProfileId === id) await saveSettings({ activeProfileId: BUILTIN_ID });
@@ -186,8 +214,7 @@ window.yga = window.yga || {};
 
     // Composition = yga:profile-channels:<id> (addedAt/lastVisitAt/groupId/...)
     async getComposition(id) {
-      const stored = await chrome.storage.local.get(compositionKey(id));
-      return stored[compositionKey(id)] || {};
+      return readComposition(id);
     },
 
     // Merge fresh subs into the profile composition (PLAN.md §11 stage 2).
@@ -198,9 +225,7 @@ window.yga = window.yga || {};
     async syncProfile(profileId, subsList) {
       const profile = this.get(profileId);
       if (!profile) return null;
-      const key = compositionKey(profileId);
-      const stored = await chrome.storage.local.get(key);
-      const comp = stored[key] || {};
+      const comp = await readComposition(profileId);
       const fresh = new Set(subsList.map((s) => s.channelId));
       let dirty = false;
       for (const id of fresh) {
@@ -221,11 +246,7 @@ window.yga = window.yga || {};
           dirty = true;
         }
       }
-      if (dirty) {
-        const payload = {};
-        payload[key] = comp;
-        chrome.storage.local.set(payload);
-      }
+      if (dirty) await writeComposition(profileId, comp);
       if (profile.includeAllSubs) {
         return Array.from(fresh).filter((id) => !comp[id] || isMember(comp[id]));
       }
@@ -237,31 +258,26 @@ window.yga = window.yga || {};
     async addChannel(profileId, channelId) {
       const profile = this.get(profileId);
       if (!profile || !channelId) return false;
-      const key = compositionKey(profileId);
-      const stored = await chrome.storage.local.get(key);
-      const comp = stored[key] || {};
+      const comp = await readComposition(profileId);
       if (comp[channelId] && isMember(comp[channelId])) return false;
       comp[channelId] = Object.assign(entry(), comp[channelId] || {});
       delete comp[channelId].unsubscribed;
       delete comp[channelId].excluded;
-      const payload = {};
-      payload[key] = comp;
-      await chrome.storage.local.set(payload);
+      await writeComposition(profileId, comp);
       return true;
     },
 
     async removeChannel(profileId, channelId) {
       const profile = this.get(profileId);
       if (!profile || !channelId) return false;
-      const key = compositionKey(profileId);
-      const stored = await chrome.storage.local.get(key);
-      const comp = stored[key] || {};
+      const comp = await readComposition(profileId);
       if (!comp[channelId]) comp[channelId] = entry();
       if (comp[channelId].excluded) return false;
-      comp[channelId].excluded = true; // lastVisitAt history kept
-      const payload = {};
-      payload[key] = comp;
-      await chrome.storage.local.set(payload);
+      // lastVisitAt=now closes the channel: its counter is history, and the
+      // stage-5 "restore" button will not resurrect a stale count (PLAN.md §10.5).
+      comp[channelId].excluded = true;
+      comp[channelId].lastVisitAt = now();
+      await writeComposition(profileId, comp);
       return true;
     },
 
@@ -270,4 +286,14 @@ window.yga = window.yga || {};
       return () => profileListeners.delete(cb);
     }
   };
+
+  // The single composition writer: state.js feeds cross-tab storage changes
+  // into the mirrors so readComposition never regresses another tab's edit.
+  if (yga.state && yga.state._registerCompWriter) {
+    yga.state._registerCompWriter({
+      adopt: function (profileId, newValue) {
+        compositionMirrors.set(profileId, newValue || {});
+      }
+    });
+  }
 })(window.yga);

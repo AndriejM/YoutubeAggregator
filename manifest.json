@@ -22,14 +22,16 @@
     {
       "matches": ["https://*.youtube.com/*"],
       "js": [
+        "content/rss-parser.js",
         "content/selectors.js",
         "content/i18n.js",
         "content/bridge-client.js",
         "content/accounts.js",
-        "content/profiles.js",
         "content/state.js",
+        "content/profiles.js",
         "content/api-client.js",
         "content/widget.js",
+        "content/counters.js",
         "content/bootstrap.js"
       ],
       "css": ["content/widget.css"],

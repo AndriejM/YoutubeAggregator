@@ -195,10 +195,37 @@ window.yga = window.yga || {};
     }
   }, { rootMargin: "200px" });
 
+  // --- counter chip (stage 3, PLAN.md §10) ---
+
+  function countText(sub) {
+    if (sub.counterError) return "?";
+    if (sub.newCount >= 15) return "15+";
+    return String(sub.newCount);
+  }
+
+  function countTitle(sub) {
+    if (sub.counterError) return yga.i18n("counterError");
+    if (sub.counterStale) return yga.i18n("counterStale");
+    return yga.i18n("newVideos").replace("{count}", String(sub.newCount));
+  }
+
+  function paintCount(row, sub) {
+    const count = row.querySelector(".yga-count");
+    if (!count) return;
+    const zero = !sub.counterError && sub.newCount === 0;
+    count.textContent = zero ? "" : countText(sub);
+    count.title = countTitle(sub);
+    count.setAttribute("aria-label", countTitle(sub));
+    count.classList.toggle("yga-hidden", zero);
+    count.classList.toggle("yga-err", !!sub.counterError);
+    count.classList.toggle("yga-stale", !!sub.counterStale);
+  }
+
   function rowNode(sub) {
     const row = el("a", "yga-row", {
       href: "/channel/" + sub.channelId + "/videos",
-      title: sub.title
+      title: sub.title,
+      "data-yga-row": sub.channelId
     });
 
     const avatar = el("img", "yga-avatar", { alt: "" });
@@ -212,8 +239,43 @@ window.yga = window.yga || {};
     const title = el("span", "yga-title");
     title.textContent = sub.title;
 
+    const count = el("span", "yga-count", { "aria-live": "polite" });
+
     row.appendChild(avatar);
     row.appendChild(title);
+    row.appendChild(count);
+    paintCount(row, sub);
+
+    // Click in the widget resets the counter, then navigates to /videos
+    // (PLAN.md §10.5 — the decision fixed 2026-11-07).
+    row.addEventListener("click", () => {
+      const profileId = yga.profiles && yga.profiles.lastActiveId();
+      if (profileId) yga.state.markVisited(profileId, sub.channelId);
+    });
+
+    // No config panel yet (stage 4): right-click is the interim "mark as
+    // watched" entry; Ctrl+click keeps the native context menu reachable.
+    row.addEventListener("contextmenu", (ev) => {
+      if (ev.ctrlKey) return;
+      ev.preventDefault();
+      const profileId = yga.profiles && yga.profiles.lastActiveId();
+      if (!profileId) {
+        console.warn("[yga] contextmenu: no active profile id");
+        return;
+      }
+      yga.state.markVisited(profileId, sub.channelId).then((visitAt) => {
+        if (!visitAt) {
+          console.warn("[yga] markVisited failed for", sub.channelId, profileId);
+          return;
+        }
+        // lastVisitAt = now ⇒ nothing cached can be newer; paint the reset
+        // immediately, the counter bus confirms it a moment later.
+        sub.lastVisitAt = visitAt;
+        sub.newCount = 0;
+        paintCount(row, sub);
+      });
+    });
+
     return row;
   }
 
@@ -331,7 +393,9 @@ window.yga = window.yga || {};
     });
     picker.appendChild(search);
     picker.appendChild(el("div", "yga-picker-rows", { "aria-live": "polite" }));
-    widget.insertBefore(picker, widget.querySelector(".yga-list"));
+    const list = widget.querySelector(".yga-list");
+    const toolbar = widget.querySelector(".yga-toolbar");
+    widget.insertBefore(picker, toolbar || list);
     return picker;
   }
 
@@ -346,7 +410,7 @@ window.yga = window.yga || {};
   async function togglePicker(widget) {
     if (pickerOpen) {
       resetPicker(widget);
-      renderFooter(widget);
+      renderToolbar(widget);
       return;
     }
     pickerOpen = true;
@@ -356,29 +420,30 @@ window.yga = window.yga || {};
     rows.appendChild(placeholderRow("loadingSubs"));
     await loadPickerData();
     if (widget.contains(picker)) fillPicker(picker);
-    renderFooter(widget);
+    renderToolbar(widget);
     const search = picker.querySelector(".yga-picker-search");
     if (search) search.focus();
   }
 
-  function renderFooter(widget) {
-    let footer = widget.querySelector(".yga-footer");
-    if (!curated()) {
-      if (footer) footer.remove();
-      return;
-    }
-    if (!footer) {
-      footer = el("div", "yga-footer");
-      widget.appendChild(footer);
-    }
-    footer.textContent = "";
+  function renderToolbar(widget) {
+    if (yga.counters) yga.counters.ensureToolbar(widget); // total + refresh survive (stage 3)
+    const toolbar = widget.querySelector(".yga-toolbar");
+    if (!toolbar) return;
+    const existing = toolbar.querySelector(".yga-picker-toggle");
+    if (existing) existing.remove();
+    if (!curated()) return;
     const btn = el("button", "yga-picker-toggle", { type: "button" });
     btn.textContent = yga.i18n(pickerOpen ? "pickerClose" : "addChannels");
     btn.addEventListener("click", () => togglePicker(widget));
-    footer.appendChild(btn);
+    toolbar.appendChild(btn);
   }
 
   yga.widget = {
+    // Last list handed to render() (shared objects, decorated in place).
+    lastRendered() {
+      return lastList;
+    },
+
     render(list) {
       lastList = list;
       const widget = document.querySelector('[data-yga="widget"]');
@@ -388,20 +453,35 @@ window.yga = window.yga || {};
 
       if (!list) {
         host.appendChild(placeholderRow("loadingSubs"));
-        renderFooter(widget);
+        renderToolbar(widget);
         return;
       }
       if (!list.length) {
         host.appendChild(placeholderRow(emptyKey()));
-        renderFooter(widget);
+        renderToolbar(widget);
         return;
       }
       const frag = document.createDocumentFragment();
       for (const sub of sortRows(list)) frag.appendChild(rowNode(sub));
       host.appendChild(frag);
-      renderFooter(widget);
+      renderToolbar(widget);
       const picker = widget.querySelector(".yga-picker");
       if (picker) fillPicker(picker);
+    },
+
+    // Counter-only repaint (stage 3): patch .yga-count in place, no rebuild
+    // of rows, avatars or the picker (PLAN.md §10.7).
+    applyCounts(list) {
+      if (!list) return;
+      const widget = document.querySelector('[data-yga="widget"]');
+      if (!widget) return;
+      const byId = new Map();
+      for (const sub of list) byId.set(sub.channelId, sub);
+      const rows = widget.querySelectorAll(".yga-list [data-yga-row]");
+      for (const row of rows) {
+        const sub = byId.get(row.getAttribute("data-yga-row"));
+        if (sub) paintCount(row, sub);
+      }
     },
 
     // Repaint after an account re-key: the picker must see the new catalog.
@@ -443,6 +523,7 @@ window.yga = window.yga || {};
       resetPicker(widget); // a rebuilt widget never inherits an open picker
       wireProfiles(widget);
     }
+    if (yga.counters) yga.counters.wire(widget);
     return widget;
   };
 })(window.yga);

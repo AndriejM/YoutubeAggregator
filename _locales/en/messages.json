@@ -82,5 +82,37 @@
   "pickerEmpty": {
     "message": "No channels match the search",
     "description": "Placeholder when the picker filter matches nothing"
+  },
+  "refresh": {
+    "message": "Refresh",
+    "description": "Short label of the counter refresh button"
+  },
+  "refreshCounters": {
+    "message": "Refresh new-video counters",
+    "description": "Aria label of the counter refresh button"
+  },
+  "totalNew": {
+    "message": "New videos",
+    "description": "Prefix of the footer total tooltip"
+  },
+  "countersStale": {
+    "message": "counters out of date",
+    "description": "Tooltip suffix when caches are older than 24 hours"
+  },
+  "countersFailed": {
+    "message": "failed channels",
+    "description": "Tooltip suffix listing channels whose RSS fetch failed"
+  },
+  "counterError": {
+    "message": "RSS unavailable — counter may be outdated",
+    "description": "Tooltip of the ? counter chip"
+  },
+  "counterStale": {
+    "message": "Data is older than a day",
+    "description": "Tooltip of a dimmed stale counter chip"
+  },
+  "newVideos": {
+    "message": "{count} new videos",
+    "description": "Tooltip of a channel counter chip"
   }
 }

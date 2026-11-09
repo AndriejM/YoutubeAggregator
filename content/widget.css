@@ -148,11 +148,96 @@
   font-size: 13px;
 }
 
-/* Widget footer: channel membership control for curated profiles (stage 2) */
-.yga-footer {
+/* Counter bar above the channel list (stage 3) + channel membership (stage 2) */
+.yga-toolbar {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 4px 8px 4px 16px;
+}
+
+/* New-video counters (PLAN.md §10) */
+.yga-count {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  text-align: center;
+  color: #fff;
+  background: var(--yga-accent);
+  border-radius: 9px;
+}
+
+.yga-count.yga-stale {
+  background: var(--yga-fg-dim);
+}
+
+.yga-count.yga-err {
+  background: transparent;
+  color: var(--yga-fg-dim);
+  border: 1px solid var(--yga-border);
+}
+
+.yga-total {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  color: #fff;
+  background: var(--yga-accent);
+  border-radius: 9px;
+}
+
+.yga-total.yga-stale {
+  background: var(--yga-fg-dim);
+}
+
+.yga-refresh {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--yga-fg-dim);
+  background: transparent;
+  border: 1px solid var(--yga-border);
+  border-radius: 6px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.yga-refresh:hover {
+  color: var(--yga-fg);
+  background: var(--yga-hover);
+}
+
+.yga-refresh:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-refresh:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* YT-override: spin must survive contain: layout style on the widget */
+.yga-refresh.yga-busy svg {
+  animation: yga-spin 0.9s linear infinite;
+}
+
+@keyframes yga-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.yga-hidden {
+  display: none !important;
 }
 
 .yga-picker-toggle {

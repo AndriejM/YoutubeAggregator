@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- Manual browser check for the shared RSS parser (PLAN.md §14): open this
+     file directly in a browser; every line must be PASS. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YouTubeAggregator — parser smoke</title>
+<style>
+  body { font: 14px/1.5 monospace; background: #111; color: #eee; padding: 16px; }
+  .pass { color: #6c6; } .fail { color: #f66; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>rss-parser smoke</h1>
+<div id="out"></div>
+
+<script src="../content/rss-parser.js"></script>
+<script type="text/plain" id="fixture"><?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="alternate" type="text/html" href="https://www.youtube.com/channel/UCtestchannel0000000000A"/>
+ <title>Smoke Channel &amp; Co.</title>
+ <yt:channelId>UCtestchannel0000000000A</yt:channelId>
+ <entry>
+  <title><![CDATA[First & "bold" <video>]]></title>
+  <yt:videoId>aaa11111111</yt:videoId>
+  <published>2026-11-08T09:00:00.000Z</published>
+  <media:group>
+   <media:thumbnail url="https://i.ytimg.com/vi/aaa11111111/hqdefault.jpg" height="360" width="480"/>
+   <media:thumbnail url="https://yt3.ggpht.com/a=s160" height="1" width="1"/>
+   <media:community media:statistics="views=42 ratings=3"/>
+  </media:group>
+ </entry>
+ <entry>
+  <title>Second</title>
+  <yt:videoId>bbb22222222</yt:videoId>
+  <published>2026-11-07T09:00:00.000Z</published>
+  <media:group><media:thumbnail url="x" height="1"/></media:group>
+ </entry>
+</feed></script>
+
+<script>
+"use strict";
+const out = document.getElementById("out");
+let fails = 0;
+function check(name, cond) {
+  const div = document.createElement("div");
+  div.textContent = (cond ? "PASS " : "FAIL ") + name;
+  div.className = cond ? "pass" : "fail";
+  if (!cond) fails++;
+  out.appendChild(div);
+}
+const feed = window.yga.rssParser.parseVideosXml(document.getElementById("fixture").textContent);
+check("feed parsed", !!feed);
+check("2 entries", !!feed && feed.entries.length === 2);
+check("CDATA title decoded", !!feed && feed.entries[0].title === 'First & "bold" <video>');
+check("videoId", !!feed && feed.entries[0].videoId === "aaa11111111");
+check("publishedAt", !!feed && feed.entries[0].publishedAt === Date.parse("2026-11-08T09:00:00.000Z"));
+check("thumbnail height=1", !!feed && feed.entries[0].thumbnail === "https://yt3.ggpht.com/a=s160");
+check("views", !!feed && feed.entries[0].views === 42);
+check("channelId", !!feed && feed.channelId === "UCtestchannel0000000000A");
+check("html rejected", window.yga.rssParser.parseVideosXml("<html></html>") === null);
+const banner = document.createElement("h2");
+banner.textContent = fails ? fails + " FAILURES" : "ALL PASS";
+banner.className = fails ? "fail" : "pass";
+out.appendChild(banner);
+</script>
+</body>
+</html>
