@@ -65,4 +65,5 @@ examples/
 # IA
 .codegraph/
 .kilocode/
-
+.roo/
+/dfs-mcp-inspect/

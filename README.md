@@ -10,7 +10,10 @@ research is kept under `examples/` and is not part of the shipped extension.
 
 ## Features
 
-- **Widget in the YouTube guide** — survives SPA navigation, follows the YouTube theme.
+- **View-only widget in the YouTube guide** — survives SPA navigation, follows the YouTube
+  theme. The header carries the total counter chip, a refresh button, a gear (⚙) to open
+  settings, and ▲/▼ to reposition the widget in the guide; the profile combobox sits on its
+  own line below. All editing (profiles, groups, channels) lives in the config panel.
 - **Local profiles** — named channel sets ("Work", "Music"); the built-in *All subscriptions*
   profile mirrors your YouTube subscriptions. Switching a profile is instant (storage only).
 - **Channel groups** — a tree in the widget: group rows with summed counters, collapsible;
@@ -20,6 +23,7 @@ research is kept under `examples/` and is not part of the shipped extension.
   opens its Videos tab and resets its counter.
 - **Inline configuration panel** — opens in YouTube's main content area (no iframe, no
   extra tab): profiles, groups, channels, counters, widget, theme, data (export/import/reset).
+  Channel rows include an open-in-new-tab link (↗).
 - **Group button on channel pages** — assign the channel to a group of the active profile
   right from the channel header.
 - **Localization** — en/ru via `_locales` + `chrome.i18n`.
@@ -44,11 +48,12 @@ page/bridge.js           MAIN-world bridge: reads ytcfg / ytInitialData, fetches
 content/bootstrap.js     entry point: waits for the guide, idempotent mount,
                          SPA re-check on yt-navigate-finish
 content/selectors.js     all YouTube DOM anchors as fallback chains + miss telemetry
-content/widget.js        sidebar widget: profile combobox, group tree, channel rows
+content/widget.js        sidebar widget: header (total chip, refresh, gear, ▲/▼), profile
+                         combobox on its own line, group tree, channel rows (view-only)
 content/groups.js        group CRUD (yga:groups)
 content/profiles.js      profile CRUD + composition; single writer of yga:settings
 content/state.js         shared state; widget and panel repaint on any change
-content/counters.js      counter view: newSince(at, lastVisitAt), footer chip
+content/counters.js      counter view: newSince(at, lastVisitAt), header total chip
 content/group-picker.js  «Group» button on channel pages (§8.8)
 content/rss-parser.js    tag-scanner XML parser (MV3 service workers have no DOMParser)
 background/service-worker.js  RSS fetch queue: dedup, batch of 12, throttle, ETag/304,
@@ -73,7 +78,7 @@ No build step — edit files and press *Reload* on the extension tile.
 
 ```
 node test/logic.mjs   # RSS parser + worker core + content view (60 checks)
-node test/dom.mjs     # widget/panel DOM layer (43 checks)
+node test/dom.mjs     # widget/panel DOM layer (68 checks)
 ```
 
 `test/smoke.html` runs the RSS parser in a real browser. Manual checklist: see the
@@ -94,7 +99,7 @@ no long tasks and no layout thrashing (interleaved read/write).
   timeouts are recorded there. YouTube DOM changes are handled by fallback chains in
   `content/selectors.js`; if a chain breaks, extend it there.
 - **Counters show `?`.** The RSS feed failed for that channel (rate limit / network);
-  the previous number is kept. Press ↻ in the widget footer to retry.
+  the previous number is kept. Press ↻ in the widget header to retry.
 - **Counters capped at `15+`.** The RSS feed only exposes the ~15 latest videos per
   channel — by design.
 - **Counters do not reset.** Only a click *in the widget* (or right-click → mark watched)
@@ -113,7 +118,7 @@ journal (`yga:log`) is local-only.
 ## Documentation
 
 [PLAN.md](PLAN.md) (Russian) is the living design document: data model, decisions log,
-milestones. Stages 0–6 are implemented; the backlog is stage 7.
+milestones. Stages 0–8 are implemented; the backlog is stage 99.
 
 ## License
 
