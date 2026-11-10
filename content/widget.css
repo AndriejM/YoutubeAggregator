@@ -18,23 +18,42 @@
   contain: layout style;
 }
 
+/* Stage 8: the header carries the title, total chip, refresh, gear and the
+   ▲/▼ slot buttons. The profile combobox sits on its own line below — the
+   header row is too narrow to also fit a select. The widget is for viewing;
+   everything else lives in the configuration panel (§9.2). */
 .yga-widget-title {
-  padding: 6px 16px 2px;
+  /* Shrinkable: at narrow guide widths the title ellipsizes instead of
+     pushing the last header button past the sidebar edge. */
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 15px;
   font-weight: 500;
   color: var(--yga-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .yga-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 16px;
+  gap: 4px;
+  padding: 6px 4px 4px 16px;
+}
+
+/* The profile combobox line: a full-width select under the header, with no
+   buttons beside it. */
+.yga-profile-row {
+  display: flex;
+  align-items: center;
+  padding: 0 8px 4px 16px;
 }
 
 .yga-profile-select {
   flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
   height: 28px;
   font: inherit;
   color: var(--yga-fg);
@@ -59,14 +78,12 @@
   cursor: default;
 }
 
-.yga-config-btn,
-.yga-profile-rename,
-.yga-profile-del {
+.yga-config-btn {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  width: 24px;
   height: 28px;
   padding: 0;
   color: var(--yga-fg-dim);
@@ -76,29 +93,14 @@
   cursor: pointer;
 }
 
-.yga-config-btn:hover,
-.yga-profile-rename:hover,
-.yga-profile-del:hover {
+.yga-config-btn:hover {
   color: var(--yga-fg);
   background: var(--yga-hover);
 }
 
-.yga-config-btn:focus-visible,
-.yga-profile-rename:focus-visible,
-.yga-profile-del:focus-visible {
+.yga-config-btn:focus-visible {
   outline: 2px solid var(--yga-accent);
   outline-offset: -2px;
-}
-
-/* Builtin profile has no rename/delete (PLAN.md §11 stage 2) */
-.yga-profile-rename:disabled,
-.yga-profile-del:disabled,
-.yga-profile-rename.yga-off,
-.yga-profile-del.yga-off {
-  color: var(--yga-fg-dim);
-  opacity: 0.35;
-  cursor: default;
-  background: transparent;
 }
 
 .yga-list {
@@ -158,34 +160,19 @@
   font-size: 13px;
 }
 
-/* Counter bar above the channel list (stage 3) + channel membership (stage 2) */
-.yga-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 4px 16px;
-}
-
 /* Guide slot controls (PLAN.md §8.3): ▲/▼ rehang the whole widget inside the
-   guide, at the bottom of the widget — the PocketTube interaction. */
-.yga-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-  padding: 2px 8px 2px 16px;
-}
-
+   guide. Stage 8 moved them from the footer into the header, next to the gear. */
 .yga-move {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 20px;
+  width: 20px;
+  height: 28px;
   padding: 0;
   color: var(--yga-fg-dim);
   background: transparent;
-  border: 1px solid var(--yga-border);
+  border: 0;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -204,11 +191,6 @@
 .yga-move.yga-off {
   opacity: 0.3;
   cursor: default;
-}
-
-.yga-widget.yga-compact .yga-footer {
-  padding-top: 1px;
-  padding-bottom: 1px;
 }
 
 /* New-video counters (PLAN.md §10) */
@@ -249,19 +231,19 @@
   background: var(--yga-fg-dim);
 }
 
+/* Stage 8: icon-only, in the header — no text label. */
 .yga-refresh {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 22px;
-  font: inherit;
-  font-size: 12px;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
   color: var(--yga-fg-dim);
   background: transparent;
-  border: 1px solid var(--yga-border);
+  border: 0;
   border-radius: 6px;
-  padding: 0 6px;
+  padding: 0;
   cursor: pointer;
 }
 
@@ -295,80 +277,8 @@
   display: none !important;
 }
 
-.yga-picker-toggle {
-  flex: 1 1 auto;
-  height: 26px;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  color: var(--yga-accent);
-  background: transparent;
-  border: 1px dashed var(--yga-border);
-  border-radius: 6px;
-  padding: 0 8px;
-  cursor: pointer;
-}
-
-.yga-picker-toggle:hover {
-  background: var(--yga-hover);
-}
-
-.yga-picker-toggle:focus-visible {
-  outline: 2px solid var(--yga-accent);
-  outline-offset: -2px;
-}
-
-/* Channel membership picker (§9.2.1): native checkboxes, capped list */
-.yga-picker {
-  margin: 4px 8px 4px 16px;
-  border: 1px solid var(--yga-border);
-  border-radius: 8px;
-  padding: 6px;
-}
-
-.yga-picker-search {
-  box-sizing: border-box;
-  width: 100%;
-  height: 26px;
-  margin-bottom: 4px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--yga-fg);
-  background: transparent;
-  border: 1px solid var(--yga-border);
-  border-radius: 6px;
-  padding: 0 6px;
-}
-
-.yga-picker-search:focus-visible {
-  outline: 2px solid var(--yga-accent);
-  outline-offset: -2px;
-}
-
-.yga-picker-rows {
-  max-height: 30vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.yga-picker-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.yga-picker-row:hover {
-  background: var(--yga-hover);
-}
-
-.yga-picker-check {
-  flex: 0 0 auto;
-  accent-color: var(--yga-accent);
-  cursor: pointer;
-}
+/* Stage 8: the channel membership picker moved to the configuration panel
+   (§9.2.1) — its .yga-picker-* styles went with it. */
 
 /* YT-override: keep the widget from widening the guide drawer */
 #guide-inner-content .yga-widget {
@@ -394,10 +304,12 @@
   height: 20px;
 }
 
-.yga-widget.yga-compact .yga-widget-title,
-.yga-widget.yga-compact .yga-header,
-.yga-widget.yga-compact .yga-toolbar {
+.yga-widget.yga-compact .yga-header {
   padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.yga-widget.yga-compact .yga-profile-row {
   padding-bottom: 2px;
 }
 

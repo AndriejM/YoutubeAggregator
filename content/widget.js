@@ -3,11 +3,12 @@ window.yga = window.yga || {};
 (function (yga) {
   "use strict";
 
+  // Stage 8: a cog, not a sun — the old circle-with-rays read as brightness.
   const GEAR_SVG =
     '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">' +
-    '<circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/>' +
-    '<path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" ' +
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    '<circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<path d="M19.3 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.6 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.6-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.6 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.6 1z" ' +
+    'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   const CHEVRON_SVG =
     '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
@@ -56,19 +57,8 @@ window.yga = window.yga || {};
       opt.textContent = p.name;
       select.appendChild(opt);
     }
-    const add = el("option", null, { value: "__add__" });
-    add.textContent = yga.i18n("newProfile");
-    select.appendChild(add);
+    // Stage 8: no «+ New profile» entry — profile CRUD lives in the panel.
     select.value = activeId || yga.profiles.BUILTIN_ID;
-  }
-
-  function setButtonsEnabled(buttons, id) {
-    const profile = id && yga.profiles.get(id);
-    const enabled = !!(profile && !profile.builtin);
-    for (const button of buttons) {
-      button.disabled = !enabled;
-      button.classList.toggle("yga-off", !enabled);
-    }
   }
 
   let profileUnsub = null; // one live listener across SPA remounts
@@ -241,9 +231,6 @@ window.yga = window.yga || {};
 
   function wireProfiles(widget) {
     const select = widget.querySelector(".yga-profile-select");
-    const rename = widget.querySelector(".yga-profile-rename");
-    const del = widget.querySelector(".yga-profile-del");
-    const editable = [rename, del];
     if (!yga.profiles) return;
     if (profileUnsub) profileUnsub();
 
@@ -255,69 +242,34 @@ window.yga = window.yga || {};
         select.removeAttribute("aria-label-placeholder");
         select.setAttribute("aria-label", yga.i18n("profilesLabel"));
         profileOptions(select, activeId);
-        setButtonsEnabled(editable, activeId);
       })
     );
 
+    // Stage 8: the widget only switches profiles. Creating, renaming and
+    // deleting them — and editing their membership — is the configuration
+    // panel's job (§9.2): the widget is for viewing.
     select.addEventListener("change", async () => {
-      if (select.value === "__add__") {
-        const name = window.prompt(yga.i18n("newProfilePrompt"));
-        const created = name ? await yga.profiles.create(name) : null;
-        resetPicker(widget);
-        if (created) {
-          activeId = created.id;
-          await yga.profiles.setActiveProfile(created.id);
-          await yga.state.refreshVisible();
-          profileOptions(select, activeId);
-          setButtonsEnabled(editable, activeId);
-          await togglePicker(widget); // a new curated profile starts by picking channels
-          return;
-        }
-        profileOptions(select, activeId);
-        setButtonsEnabled(editable, activeId);
-        await yga.state.refreshVisible();
-        return;
-      }
       activeId = select.value;
-      resetPicker(widget); // membership editor belongs to one profile only
       await yga.profiles.setActiveProfile(activeId);
-      setButtonsEnabled(editable, activeId);
       await yga.state.refreshVisible(); // instant, no YouTube request
-    });
-
-    rename.addEventListener("click", async () => {
-      const profile = yga.profiles.get(activeId);
-      if (!profile || profile.builtin) return;
-      const name = window.prompt(yga.i18n("renameProfilePrompt"), profile.name);
-      if (await yga.profiles.rename(activeId, name)) {
-        profileOptions(select, activeId);
-      } else {
-        select.value = activeId;
-      }
-    });
-
-    del.addEventListener("click", async () => {
-      if (await yga.profiles.remove(activeId)) {
-        resetPicker(widget);
-        activeId = await yga.profiles.activeProfileId();
-        profileOptions(select, activeId);
-        setButtonsEnabled(editable, activeId);
-        await yga.state.refreshVisible();
-      } else {
-        select.value = activeId;
-      }
     });
 
     yga.profiles.onProfilesChanged(() => {
       profileOptions(select, activeId);
-      setButtonsEnabled(editable, activeId);
     });
   }
 
   function buildWidget() {
     const widget = el("div", "yga-widget", { "data-yga": "widget" });
 
+    // Stage 8: the header carries the title and the view controls. counters.js
+    // inserts the total chip and the icon-only refresh button before the gear,
+    // so the order is title → total → refresh → gear → ▲ → ▼. The profile
+    // combobox never fit this tight row — it gets its own line below.
     const header = el("div", "yga-header");
+
+    const title = el("div", "yga-widget-title");
+    title.textContent = yga.i18n("widgetTitle");
 
     const select = el("select", "yga-profile-select", {
       disabled: true,
@@ -340,37 +292,8 @@ window.yga = window.yga || {};
       if (yga.panel) yga.panel.toggle();
     });
 
-    const rename = el("button", "yga-profile-rename", {
-      type: "button",
-      "aria-label": yga.i18n("renameProfile"),
-      title: yga.i18n("renameProfile"),
-      disabled: true
-    });
-    rename.innerHTML =
-      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
-      '<path d="M4 20h4L20 8l-4-4L4 16v4z" fill="none" stroke="currentColor" ' +
-      'stroke-width="2" stroke-linejoin="round"/></svg>';
-
-    const del = el("button", "yga-profile-del", {
-      type: "button",
-      "aria-label": yga.i18n("deleteProfile"),
-      title: yga.i18n("deleteProfile"),
-      disabled: true
-    });
-    del.innerHTML =
-      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
-      '<path d="M7 7l10 10M17 7L7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-
-    header.appendChild(select);
-    header.appendChild(rename);
-    header.appendChild(del);
-    header.appendChild(gear);
-
-    const list = el("div", "yga-list", { "aria-live": "polite" });
-
-    // Guide slot controls (PLAN.md §8.3) — the PocketTube way of moving the
-    // widget up/down the sidebar without opening the configuration panel.
-    const footer = el("div", "yga-footer");
+    // Guide slot controls (PLAN.md §8.3) — ▲/▼ rehang the widget inside the
+    // guide. Stage 8 moved them from the footer into the header.
     const up = el("button", "yga-move yga-move-up", {
       type: "button",
       "aria-label": yga.i18n("moveUp"),
@@ -385,16 +308,23 @@ window.yga = window.yga || {};
     down.innerHTML = ARROW_DOWN_SVG;
     up.addEventListener("click", () => moveWidget(widget, -1));
     down.addEventListener("click", () => moveWidget(widget, 1));
-    footer.appendChild(up);
-    footer.appendChild(down);
+
+    header.appendChild(title);
+    header.appendChild(gear);
+    header.appendChild(up);
+    header.appendChild(down);
+
+    // The profile combobox lives on its own line under the header: the header
+    // row is too narrow to also fit a select, and the line carries nothing but
+    // the combobox — no buttons.
+    const profileRow = el("div", "yga-profile-row");
+    profileRow.appendChild(select);
+
+    const list = el("div", "yga-list", { "aria-live": "polite" });
 
     widget.appendChild(header);
+    widget.appendChild(profileRow);
     widget.appendChild(list);
-    widget.appendChild(footer);
-
-    const title = el("div", "yga-widget-title");
-    title.textContent = yga.i18n("widgetTitle");
-    widget.insertBefore(title, header);
     return widget;
   }
 
@@ -592,12 +522,6 @@ window.yga = window.yga || {};
 
   function activeProfile() {
     return (lastActiveId && yga.profiles && yga.profiles.get(lastActiveId)) || null;
-  }
-
-  // Curated profile = user picks channels; builtin p_1 mirrors all subscriptions.
-  function curated() {
-    const p = activeProfile();
-    return !!(p && !p.includeAllSubs);
   }
 
   // --- group tree (stage 5, PLAN.md §18) ---
@@ -813,145 +737,9 @@ window.yga = window.yga || {};
     }
   }
 
-  // --- channel membership picker for curated profiles (§9.2.1, stage 2) ---
-
-  const PICKER_LIMIT = 200; // 995 subs must not freeze the guide drawer
-  const SEARCH_DEBOUNCE_MS = 150;
-  let pickerOpen = false;
-  let pickerFilter = "";
-  let pickerTimer = 0;
-  let pickerData = null; // {subs, comp} while the picker is open
+  // Stage 8: the channel membership picker (§9.2.1, stage 2) moved to the
+  // configuration panel — the widget is for viewing, not for editing.
   let lastList = null;
-
-  function sortRows(list) {
-    return list.slice().sort((a, b) =>
-      (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" })
-    );
-  }
-
-  async function loadPickerData() {
-    const p = activeProfile();
-    const [subs, comp] = await Promise.all([
-      yga.state.getAllSubs(),
-      p ? yga.profiles.getComposition(p.id) : {}
-    ]);
-    pickerData = { subs: subs, comp: comp, profileId: p ? p.id : null };
-    return pickerData;
-  }
-
-  function pickerRow(sub, profileId, isMember) {
-    const row = el("label", "yga-picker-row");
-    const box = el("input", "yga-picker-check", { type: "checkbox" });
-    box.checked = isMember;
-    box.addEventListener("change", async () => {
-      box.disabled = true;
-      if (box.checked) await yga.profiles.addChannel(profileId, sub.channelId);
-      else await yga.profiles.removeChannel(profileId, sub.channelId);
-      if (pickerData) pickerData.comp = await yga.profiles.getComposition(profileId);
-      box.disabled = false;
-      await yga.state.refreshVisible(); // the widget list follows immediately
-    });
-
-    const title = el("span", "yga-title");
-    title.textContent = sub.title;
-    title.title = sub.title;
-
-    row.appendChild(box);
-    row.appendChild(title);
-    return row;
-  }
-
-  function fillPicker(picker) {
-    const host = picker.querySelector(".yga-picker-rows");
-    if (!host || !pickerData) return;
-    host.textContent = "";
-    const needle = pickerFilter.trim().toLowerCase();
-    const all = pickerData.subs;
-    const matched = needle
-      ? all.filter((s) => (s.title || "").toLowerCase().indexOf(needle) >= 0)
-      : all;
-    const shown = sortRows(matched).slice(0, PICKER_LIMIT);
-
-    const frag = document.createDocumentFragment();
-    for (const sub of shown) {
-      const rec = pickerData.comp[sub.channelId];
-      frag.appendChild(pickerRow(sub, pickerData.profileId, !!rec && !rec.unsubscribed && !rec.excluded));
-    }
-    host.appendChild(frag);
-
-    if (matched.length > shown.length) {
-      const hint = el("div", "yga-placeholder");
-      hint.textContent = yga.i18n("pickerMore").replace("{count}", String(matched.length));
-      host.appendChild(hint);
-    } else if (!shown.length) {
-      const hint = el("div", "yga-placeholder");
-      hint.textContent = yga.i18n("pickerEmpty");
-      host.appendChild(hint);
-    }
-  }
-
-  function buildPicker(widget) {
-    const picker = el("div", "yga-picker");
-    const search = el("input", "yga-picker-search", {
-      type: "search",
-      "aria-label": yga.i18n("pickerSearch")
-    });
-    search.placeholder = yga.i18n("pickerSearch");
-    search.value = pickerFilter;
-    search.addEventListener("input", () => {
-      pickerFilter = search.value;
-      if (pickerTimer) clearTimeout(pickerTimer);
-      pickerTimer = setTimeout(() => fillPicker(picker), SEARCH_DEBOUNCE_MS);
-    });
-    picker.appendChild(search);
-    picker.appendChild(el("div", "yga-picker-rows", { "aria-live": "polite" }));
-    const list = widget.querySelector(".yga-list");
-    const toolbar = widget.querySelector(".yga-toolbar");
-    widget.insertBefore(picker, toolbar || list);
-    return picker;
-  }
-
-  function resetPicker(widget) {
-    pickerOpen = false;
-    pickerData = null;
-    pickerFilter = "";
-    // Called on every profile switch: group collapse is per-profile state, and
-    // the pseudo-group has no storage at all (§18.2), so it must not leak.
-    ungroupedCollapsed = false;
-    const picker = widget && widget.querySelector(".yga-picker");
-    if (picker) picker.remove();
-  }
-
-  async function togglePicker(widget) {
-    if (pickerOpen) {
-      resetPicker(widget);
-      renderToolbar(widget);
-      return;
-    }
-    pickerOpen = true;
-    pickerData = null;
-    const picker = buildPicker(widget);
-    const rows = picker.querySelector(".yga-picker-rows");
-    rows.appendChild(placeholderRow("loadingSubs"));
-    await loadPickerData();
-    if (widget.contains(picker)) fillPicker(picker);
-    renderToolbar(widget);
-    const search = picker.querySelector(".yga-picker-search");
-    if (search) search.focus();
-  }
-
-  function renderToolbar(widget) {
-    if (yga.counters) yga.counters.ensureToolbar(widget); // total + refresh survive (stage 3)
-    const toolbar = widget.querySelector(".yga-toolbar");
-    if (!toolbar) return;
-    const existing = toolbar.querySelector(".yga-picker-toggle");
-    if (existing) existing.remove();
-    if (!curated()) return;
-    const btn = el("button", "yga-picker-toggle", { type: "button" });
-    btn.textContent = yga.i18n(pickerOpen ? "pickerClose" : "addChannels");
-    btn.addEventListener("click", () => togglePicker(widget));
-    toolbar.appendChild(btn);
-  }
 
   // Counter-only repaint (stage 3): patch .yga-count in place, no rebuild
   // of rows, avatars or the picker (PLAN.md §10.7). Group chips are the sum
@@ -989,7 +777,7 @@ window.yga = window.yga || {};
         host.textContent = "";
         groupChips = new Map();
         host.appendChild(placeholderRow(list ? emptyKey() : "loadingSubs"));
-        renderToolbar(widget);
+        if (yga.counters) yga.counters.ensureToolbar(widget);
         return;
       }
       // Keyed reconciliation (PLAN.md §18.3): a group whose collapse state and
@@ -999,25 +787,14 @@ window.yga = window.yga || {};
       // Reused rows carry their previous chips — repaint them, exactly as the
       // freshly built ones are painted in rowNode (§10.4).
       applyCounts(list);
-      renderToolbar(widget);
-      const picker = widget.querySelector(".yga-picker");
-      if (picker) fillPicker(picker);
+      if (yga.counters) yga.counters.ensureToolbar(widget);
     },
 
     applyCounts: applyCounts,
 
-    // Repaint after an account re-key: the picker must see the new catalog.
+    // Repaint after an account re-key: the list must show the new catalog.
     refresh() {
-      const widget = document.querySelector('[data-yga="widget"]');
-      const wasOpen = !!(widget && widget.querySelector(".yga-picker"));
-      pickerData = null;
-      yga.state.getVisibleSubs().then(async (list) => {
-        yga.widget.render(list);
-        if (!wasOpen) return;
-        await loadPickerData();
-        const picker = document.querySelector('[data-yga="widget"] .yga-picker');
-        if (picker) fillPicker(picker);
-      });
+      yga.state.getVisibleSubs().then((list) => yga.widget.render(list));
     }
   };
 
@@ -1108,7 +885,7 @@ window.yga = window.yga || {};
       Promise.all([ready, yga.state.getVisibleSubs()]).then((parts) => yga.widget.render(parts[1]));
     }
     if (yga.profiles) {
-      resetPicker(widget); // a rebuilt widget never inherits an open picker
+      ungroupedCollapsed = false; // a rebuilt widget starts fully expanded
       wireProfiles(widget);
     }
     if (yga.counters) yga.counters.wire(widget);

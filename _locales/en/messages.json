@@ -271,6 +271,10 @@
     "message": "{count} channels match — refine the search",
     "description": "Hint when the channel list is truncated"
   },
+  "channelsOpen": {
+    "message": "Open channel in a new tab",
+    "description": "Link button that opens a channel in a new browser tab"
+  },
   "groupNone": {
     "message": "No group",
     "description": "Group chip of a channel without a group"

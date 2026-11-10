@@ -41,9 +41,9 @@ window.yga = window.yga || {};
   }
 
   function updateTotal(widget) {
-    const toolbar = widget && widget.querySelector(".yga-toolbar");
-    if (!toolbar) return;
-    const total = toolbar.querySelector(".yga-total");
+    const header = widget && widget.querySelector(".yga-header");
+    if (!header) return;
+    const total = header.querySelector(".yga-total");
     if (!total) return;
     let agg = yga.state.getAggregate();
     if ((!agg || !agg.newCount) && yga.state.countersReady()) {
@@ -70,21 +70,20 @@ window.yga = window.yga || {};
   yga.counters = {
     newSince: newSince,
 
+    // Stage 8: the total chip and the refresh button live in the widget header
+    // (to the right of the title), not in a separate toolbar row. The refresh
+    // button is icon-only — the header is tight on space.
     ensureToolbar(widget) {
-      let toolbar = widget.querySelector(".yga-toolbar");
-      if (!toolbar) {
-        toolbar = document.createElement("div");
-        toolbar.className = "yga-toolbar";
-        const list = widget.querySelector(".yga-list");
-        if (list) widget.insertBefore(toolbar, list);
-        else widget.appendChild(toolbar);
-      }
-      if (!toolbar.querySelector(".yga-total")) {
+      const header = widget.querySelector(".yga-header");
+      if (!header) return;
+      const gear = header.querySelector(".yga-config-btn");
+      const before = gear || null;
+      if (!header.querySelector(".yga-total")) {
         const total = document.createElement("span");
         total.className = "yga-total";
-        toolbar.appendChild(total);
+        header.insertBefore(total, before);
       }
-      if (!toolbar.querySelector(".yga-refresh")) {
+      if (!header.querySelector(".yga-refresh")) {
         const btn = document.createElement("button");
         btn.className = "yga-refresh";
         btn.type = "button";
@@ -94,20 +93,19 @@ window.yga = window.yga || {};
           '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
           '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4" fill="none" stroke="currentColor" ' +
           'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        btn.appendChild(document.createTextNode(yga.i18n("refresh")));
         btn.addEventListener("click", () => yga.counters.refresh(widget));
-        toolbar.appendChild(btn);
+        header.insertBefore(btn, before);
       }
       updateTotal(widget);
     },
 
     async refresh(widget) {
-      const toolbar = widget && widget.querySelector(".yga-toolbar");
-      const btn = toolbar && toolbar.querySelector(".yga-refresh");
+      const header = widget && widget.querySelector(".yga-header");
+      const btn = header && header.querySelector(".yga-refresh");
       if (!btn) return;
       btn.classList.add("yga-busy");
       btn.disabled = true;
-      const total = toolbar.querySelector(".yga-total");
+      const total = header.querySelector(".yga-total");
       if (total) {
         total.textContent = "…";
         total.classList.remove("yga-hidden");

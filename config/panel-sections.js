@@ -571,6 +571,18 @@ window.yga = window.yga || {};
       yga.panel.refresh("channels");
     });
 
+    // Stage 8: a link button on the right of the row opens the channel in a
+    // new tab. A real <a target="_blank"> — middle-click/Ctrl+click behave as
+    // the user expects, and the panel (a full-screen overlay) stays open.
+    const open = el("a", "yga-panel-icon yga-panel-open", {
+      href: "/channel/" + sub.channelId + "/videos",
+      target: "_blank",
+      rel: "noopener",
+      "aria-label": yga.i18n("channelsOpen"),
+      title: yga.i18n("channelsOpen")
+    });
+    open.textContent = "\u2197"; // ↗ static glyph, no YouTube data (§12)
+
     row.appendChild(box);
     row.appendChild(avatar);
     row.appendChild(title);
@@ -578,6 +590,7 @@ window.yga = window.yga || {};
     row.appendChild(group);
     row.appendChild(reset);
     row.appendChild(toggle);
+    row.appendChild(open);
     if (box.checked) row.classList.add("yga-panel-selected");
     return row;
   }

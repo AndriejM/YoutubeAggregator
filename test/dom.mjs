@@ -533,6 +533,50 @@ env.sandbox.chrome.storage.local
     gear.dispatchEvent({ type: "click" });
     await flush(40); // section builders are async
 
+    // --- stage 8: view-only widget chrome (PLAN.md §9) ---------------------
+    // Title, total chip, icon-only refresh, gear and ▲/▼ live in the header;
+    // the profile combobox sits on its own line below it (no buttons there);
+    // profile CRUD and the membership picker moved to the panel.
+    const header = mounted.querySelector(".yga-header");
+    check(
+      "stage8: profile combobox is NOT in the header row",
+      !!header && !header.querySelector(".yga-profile-select"),
+      JSON.stringify(header && header.children.map((c) => c.className))
+    );
+    check(
+      "stage8: profile combobox lives on its own line below the header",
+      !!mounted.querySelector(".yga-profile-row .yga-profile-select") &&
+        mounted.children.indexOf(mounted.querySelector(".yga-profile-row")) ===
+          mounted.children.indexOf(header) + 1 &&
+        !mounted.querySelector(".yga-profile-row").querySelector("button"),
+      JSON.stringify(mounted.children.map((c) => c.className))
+    );
+    check(
+      "stage8: header carries total, refresh, gear and the move buttons",
+      !!header &&
+        !!header.querySelector(".yga-total") &&
+        !!header.querySelector(".yga-refresh") &&
+        !!header.querySelector(".yga-config-btn") &&
+        !!header.querySelector(".yga-move-up") &&
+        !!header.querySelector(".yga-move-down"),
+      JSON.stringify(header && header.children.map((c) => c.className))
+    );
+    check(
+      "stage8: refresh button is icon-only (no text label)",
+      !!header && header.querySelector(".yga-refresh").textContent === "",
+      JSON.stringify(header && header.querySelector(".yga-refresh").textContent)
+    );
+    check(
+      "stage8: no rename/delete profile buttons in the widget",
+      !mounted.querySelector(".yga-profile-rename") && !mounted.querySelector(".yga-profile-del")
+    );
+    check(
+      "stage8: profile select has no «+ New profile» option",
+      !Array.from(mounted.querySelector(".yga-profile-select").children).some((o) => o.value === "__add__")
+    );
+    check("stage8: no footer / toolbar row left in the widget",
+      !mounted.querySelector(".yga-footer") && !mounted.querySelector(".yga-toolbar"));
+
     check("panel: gear opens the panel", yga.panel.isOpen());
     const panel = content.querySelector('[data-yga="panel"]');
     check("panel: panel is a child of #content", !!panel && panel.parentNode === content);
@@ -706,6 +750,22 @@ env.sandbox.chrome.storage.local
         !!pseudo.querySelector('[data-yga-row="' + CH1 + '"]')
     );
 
+    // --- stage 8: open-channel link on the panel's channel rows (§9.2.1) ----
+    yga.panel.open("channels");
+    await flush(40);
+    const csection = content.querySelector('[data-section="channels"]');
+    const openLink = csection && csection.querySelector(".yga-panel-channel .yga-panel-open");
+    check(
+      "stage8: channel row has an open-in-new-tab link (§9.2.1)",
+      !!openLink &&
+        openLink.tagName === "A" &&
+        openLink.getAttribute("href") === "/channel/" + CH1 + "/videos" &&
+        openLink.getAttribute("target") === "_blank",
+      JSON.stringify(openLink && [openLink.tagName, openLink.getAttribute("href"), openLink.getAttribute("target")])
+    );
+    yga.panel.close();
+    await flush(10);
+
     // --- incremental render (PLAN.md §18.3) --------------------------------
     // A re-render of an unchanged tree must not rebuild the sidebar: the same
     // nodes have to survive, otherwise every navigation flickers the guide.
@@ -728,7 +788,7 @@ env.sandbox.chrome.storage.local
 
     const moveUp = mounted.querySelector(".yga-move-up");
     const moveDown = mounted.querySelector(".yga-move-down");
-    check("slot: footer move buttons rendered (§8.3)", !!moveUp && !!moveDown);
+    check("slot: header move buttons rendered (§8.3)", !!moveUp && !!moveDown);
     check("slot: widget sits after the guide renderer", slotOf() === 1, String(slotOf()));
 
     moveDown.dispatchEvent({ type: "click" });

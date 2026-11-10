@@ -392,6 +392,18 @@
   color: #c00;
 }
 
+/* Stage 8: the open-channel link is an <a> styled as an icon button — strip
+   the anchor's default underline/colour so it matches the row's other icons. */
+.yga-panel-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  text-decoration: none;
+  text-align: center;
+}
+
 .yga-panel-file {
   font: inherit;
   font-size: 13px;
