@@ -841,9 +841,13 @@ env.sandbox.chrome.storage.local
     );
     const letters = gpHost ? gpHost.querySelectorAll(".yga-gp-letter") : [];
     check(
-      "stage9: one button per profile, first letter as label",
-      letters.length === 3 && letters.map((b) => b.textContent).join("") === "ACG",
+      "stage9: one button per curated profile, first letter as label (no «Все подписки»)",
+      letters.length === 2 && letters.map((b) => b.textContent).join("") === "CG",
       JSON.stringify(letters.map((b) => b.textContent))
+    );
+    check(
+      "stage9: the built-in all-subs profile has no letter button",
+      !!gpHost && !gpHost.querySelector('[data-yga-profile="p_1"]')
     );
     check(
       "stage9: buttons carry the profile color",
@@ -925,16 +929,16 @@ env.sandbox.chrome.storage.local
       colorInputs.length === 3,
       String(colorInputs.length)
     );
-    colorInputs[0].value = "#123456";
-    colorInputs[0].dispatchEvent({ type: "change" });
+    colorInputs[1].value = "#123456";
+    colorInputs[1].dispatchEvent({ type: "change" });
     await flush(40);
     check(
       "stage9: colorpicker writes the profile color",
-      yga.profiles.get("p_1").color === "#123456",
-      JSON.stringify(yga.profiles.get("p_1"))
+      yga.profiles.get(p2.id).color === "#123456",
+      JSON.stringify(yga.profiles.get(p2.id))
     );
     const gpAfter = document.querySelector("[data-yga-group-buttons]");
-    const aBtn = gpAfter && gpAfter.querySelector('[data-yga-profile="p_1"]');
+    const aBtn = gpAfter && gpAfter.querySelector('[data-yga-profile="' + p2.id + '"]');
     check(
       "stage9: letter button repaints with the new profile color",
       !!aBtn && aBtn.styleVars["--yga-gp-color"] === "#123456",
@@ -966,7 +970,7 @@ env.sandbox.chrome.storage.local
     const gpLate = document.querySelector("[data-yga-group-buttons]");
     check(
       "stage9: buttons mount once the late anchor appears (retry)",
-      !!gpLate && gpLate.querySelectorAll(".yga-gp-letter").length === 3,
+      !!gpLate && gpLate.querySelectorAll(".yga-gp-letter").length === 2,
       JSON.stringify(gpLate && gpLate.querySelectorAll(".yga-gp-letter").length)
     );
 
@@ -993,7 +997,7 @@ env.sandbox.chrome.storage.local
     const gpShadow = document.querySelector("[data-yga-group-buttons]");
     check(
       "stage9: buttons mount by piercing the shadow root (standalone)",
-      !!gpShadow && gpShadow.querySelectorAll(".yga-gp-letter").length === 3,
+      !!gpShadow && gpShadow.querySelectorAll(".yga-gp-letter").length === 2,
       JSON.stringify(gpShadow && gpShadow.querySelectorAll(".yga-gp-letter").length)
     );
     shadowHost.remove();

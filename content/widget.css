@@ -393,12 +393,12 @@
    places it in document coordinates from the native anchor's bounding rect, so
    a plain scroll does not move it and cannot make it jump. */
 .yga-gp-group {
-  --yga-fg: var(--yt-spec-text-primary, #0f0f0f);
-  --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
-  --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
-  --yga-border: var(--yt-spec-outline, rgba(0, 0, 0, 0.15));
+  --yga-fg: #0f0f0f;
+  --yga-fg-dim: #606060;
+  --yga-hover: rgba(0, 0, 0, 0.05);
+  --yga-border: rgba(0, 0, 0, 0.15);
   --yga-accent: #c00;
-  --yga-surface: var(--yt-spec-general-background-a, #fff);
+  --yga-surface: #fff;
 
   position: absolute;
   z-index: 10000;
@@ -449,7 +449,21 @@
   box-shadow: 0 0 0 2px var(--yga-surface, #fff), 0 0 0 4px var(--yga-gp-color, #e05252);
 }
 
+/* The menu is appended to document.body (the letter-button host is an absolute
+   overlay, so it cannot be the menu's containing block), which means it does NOT
+   inherit the --yga-* variables declared on .yga-gp-group. Those variables are
+   written inline by content/theme.js (theme.apply) exactly like the widget, so
+   the dropdown follows YouTube's real theme with enforced contrast. The values
+   here are only the light fallback used when theme.followYouTube is false
+   (theme.clear strips the inline vars) or before the first theme pass. */
 .yga-gp-menu {
+  --yga-fg: #0f0f0f;
+  --yga-fg-dim: #606060;
+  --yga-hover: rgba(0, 0, 0, 0.05);
+  --yga-border: rgba(0, 0, 0, 0.15);
+  --yga-accent: #c00;
+  --yga-surface: #fff;
+
   position: absolute;
   z-index: 10001;
   display: flex;
@@ -458,6 +472,7 @@
   max-height: 60vh;
   overflow-y: auto;
   padding: 6px;
+  font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
   color: var(--yga-fg, #0f0f0f);
   background: var(--yga-surface, #fff);
   border: 1px solid var(--yga-border, rgba(0, 0, 0, 0.15));

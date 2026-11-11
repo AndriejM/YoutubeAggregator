@@ -235,6 +235,32 @@ window.yga = window.yga || {};
     }
   }
 
+  // Theme a picker surface exactly like the widget: content/theme.js writes the
+  // --yga-* palette inline from YouTube's live theme (contrast enforced). The
+  // menu lives on document.body and the host is an absolute overlay, so neither
+  // inherits the widget's vars — each must be themed on its own. When the user
+  // pins the light palette (theme.followYouTube === false) theme.clear strips
+  // the inline vars so the light CSS fallback shows through.
+  async function themeNode(node) {
+    if (!node || !node.style) return;
+    let follow = true;
+    let accent = "#c00";
+    try {
+      const s = await yga.profiles.getSettings();
+      const t = (s && s.theme) || {};
+      follow = t.followYouTube !== false;
+      accent = /^#[0-9a-f]{6}$/i.test(t.accent || "") ? t.accent : "#c00";
+    } catch (e) {
+      console.debug("[yga] group-picker theme read failed:", e);
+    }
+    node.style.setProperty("--yga-accent", accent);
+    if (!follow) {
+      if (yga.theme && yga.theme.clear) yga.theme.clear(node);
+    } else if (yga.theme && yga.theme.apply) {
+      yga.theme.apply(node);
+    }
+  }
+
   async function openMenu(btn, channelId, profileId) {
     closeMenu();
     await yga.groups.load();
@@ -303,9 +329,13 @@ window.yga = window.yga || {};
     quick.appendChild(ok);
     box.appendChild(quick);
 
-    // The letter-button host is a fixed overlay that carries a transform, which
-    // would make it the containing block for a fixed-position menu. Append the
-    // menu to document.body so it positions against the viewport.
+    // The letter-button host is an absolute overlay, so it would be the
+    // containing block for an absolutely-positioned menu. Append the menu to
+    // document.body and position it fixed against the viewport instead.
+    // The menu is not a descendant of the widget or the host, so it inherits no
+    // --yga-* palette: theme it from YouTube's live theme (theme.apply works on
+    // a detached node) BEFORE appending, so it never paints the light fallback.
+    await themeNode(box);
     document.body.appendChild(box);
     // The header is not a positioned ancestor, so the menu is fixed and placed
     // from the button rect instead of relying on an offset parent.
@@ -995,6 +1025,13 @@ window.yga = window.yga || {};
     // paint() resolves groups through yga.groups.get(); without a load the very
     // first paint marks every button unchecked even when the channel is grouped.
     await yga.groups.load();
+    // "Все подписки" (the built-in includeAllSubs profile) never carries groups,
+    // so it gets no letter button here — the picker only covers curated profiles.
+    const pickerProfiles = yga.profiles.list().filter((p) => !p.builtin && !p.includeAllSubs);
+    if (!pickerProfiles.length) {
+      unmount();
+      return;
+    }
     host = el("div", "yga-gp-group", {
       role: "group",
       "aria-label": yga.i18n("groupButton")
@@ -1002,7 +1039,7 @@ window.yga = window.yga || {};
     host.setAttribute(GROUPS_ATTR, "");
     host.setAttribute(ANCHOR_ATTR, anchor.name || "");
     const buttons = [];
-    for (const p of yga.profiles.list()) {
+    for (const p of pickerProfiles) {
       const btn = el("button", "yga-gp-letter", {
         type: "button",
         "aria-haspopup": "menu",
@@ -1023,7 +1060,9 @@ window.yga = window.yga || {};
       buttons.push({ btn: btn, profileId: p.id });
     }
 
-    // The overlay lives on document.body, never inside YouTube's tree.
+    // The overlay lives on document.body, never inside YouTube's tree. Theme it
+    // before appending (its active-button ring reads --yga-surface).
+    await themeNode(host);
     document.body.appendChild(host);
     upgradeTries = 0;
     lastUpgradeTry = 0;
