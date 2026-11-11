@@ -122,9 +122,22 @@ window.yga = window.yga || {};
       const count = el("span", "yga-panel-meta");
       count.textContent = String(countMembers(comp));
 
+      // Stage 9: per-profile color for the channel-page/watch-page letter
+      // buttons (PLAN.md §8.8).
+      const color = el("input", "yga-panel-color", {
+        type: "color",
+        "aria-label": yga.i18n("profileColor")
+      });
+      color.value = /^#[0-9a-f]{6}$/i.test(p.color || "") ? p.color : "#e05252";
+      color.addEventListener("change", async () => {
+        await yga.profiles.setColor(p.id, color.value);
+        yga.panel.refresh("profiles");
+      });
+
       row.appendChild(radio);
       row.appendChild(label);
       row.appendChild(count);
+      row.appendChild(color);
 
       if (!p.builtin) {
         const rename = u.button("renameProfile", "yga-panel-icon");
@@ -730,6 +743,14 @@ window.yga = window.yga || {};
       await u.save("widget.channelPageButton", pageButton.checked);
     });
     host.appendChild(u.field("widgetChannelPageButton", pageButton, "widgetChannelPageButtonHint"));
+
+    // Stage 9: the letter buttons left of Like/Dislike on watch pages.
+    const watchButton = el("input", "yga-panel-check", { type: "checkbox" });
+    watchButton.checked = w.watchPageButton !== false;
+    watchButton.addEventListener("change", async () => {
+      await u.save("widget.watchPageButton", watchButton.checked);
+    });
+    host.appendChild(u.field("widgetWatchPageButton", watchButton, "widgetWatchPageButtonHint"));
 
     // §18.6: the profile sort orders channels inside groups.
     const profileId = await yga.profiles.activeProfileId();

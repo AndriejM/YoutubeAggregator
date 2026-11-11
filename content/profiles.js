@@ -9,6 +9,14 @@ window.yga = window.yga || {};
   const SETTINGS_KEY = "yga:settings";
   const BUILTIN_ID = "p_1";
 
+  // Stage 9: profile colors drive the channel-page/watch-page letter buttons
+  // (PLAN.md §8.8). New profiles cycle through this palette; the user can
+  // override per profile through the colorpicker in the panel (§9.2.1).
+  const PALETTE = [
+    "#e05252", "#e08a3c", "#d8b93a", "#57a64a",
+    "#3aa6a0", "#4a7fd6", "#7a5fd6", "#c05aa6"
+  ];
+
   let profiles = null; // id -> profile
   let lastActive = null; // active profile id seen by this world (widget/footer fast path)
   const profileListeners = new Set();
@@ -52,8 +60,18 @@ window.yga = window.yga || {};
       createdAt: now(), updatedAt: now(),
       sort: "activity",
       filters: { hideWatched: false, excludeShorts: false, excludeLive: false },
-      includeAllSubs: true
+      includeAllSubs: true,
+      color: PALETTE[0]
     };
+  }
+
+  // Deterministic palette pick for backfills: hash the id so an existing
+  // profile keeps the same color across reloads.
+  function paletteColor(id) {
+    let h = 0;
+    const s = String(id || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
   }
 
   function defaults() {
@@ -61,7 +79,7 @@ window.yga = window.yga || {};
       version: 1,
       activeProfileId: BUILTIN_ID,
       refresh: { mode: "onOpen", scheduled: { enabled: false, periodInMinutes: 240, maxChannelsPerRun: 60 }, batch: 12, minIntervalMs: 90000 },
-      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true },
+      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true, watchPageButton: true },
       theme: { followYouTube: true, accent: "#c00" }
     };
   }
@@ -204,6 +222,16 @@ window.yga = window.yga || {};
         profiles[BUILTIN_ID] = builtinProfile();
         await persistProfiles();
       }
+      // Stage 9 backfill: profiles saved before the color field exist.
+      let backfilled = false;
+      Object.keys(profiles).forEach(function (id) {
+        const p = profiles[id];
+        if (!p.color) {
+          p.color = id === BUILTIN_ID ? PALETTE[0] : paletteColor(id);
+          backfilled = true;
+        }
+      });
+      if (backfilled) await persistProfiles();
       return profiles;
     },
 
@@ -278,7 +306,8 @@ window.yga = window.yga || {};
         createdAt: now(), updatedAt: now(),
         sort: "activity",
         filters: { hideWatched: false, excludeShorts: false, excludeLive: false },
-        includeAllSubs: false
+        includeAllSubs: false,
+        color: paletteColor(id)
       };
       await persistProfiles();
       await writeComposition(id, {});
@@ -324,6 +353,19 @@ window.yga = window.yga || {};
       const allowed = ["activity", "alpha", "subs", "manual", "groups"];
       if (!p || allowed.indexOf(sort) < 0 || p.sort === sort) return false;
       p.sort = sort;
+      p.updatedAt = now();
+      await persistProfiles();
+      return true;
+    },
+
+    // Stage 9: per-profile color used by the channel-page/watch-page letter
+    // buttons. Accepts "#rrggbb"; anything else is ignored.
+    async setColor(id, color) {
+      await this.load();
+      const p = profiles[id];
+      const value = String(color || "").toLowerCase();
+      if (!p || !/^#[0-9a-f]{6}$/.test(value) || p.color === value) return false;
+      p.color = value;
       p.updatedAt = now();
       await persistProfiles();
       return true;

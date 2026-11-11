@@ -313,7 +313,7 @@
       const meta = data && data.metadata && data.metadata.channelMetadataRenderer;
       const externalId = meta && meta.externalId;
       let channelId = typeof externalId === "string" && externalId.indexOf("UC") === 0 ? externalId : "";
-      const title = meta ? txt(meta.title) : "";
+      let title = meta ? txt(meta.title) : "";
       if (!channelId) {
         const link = document.querySelector('link[rel="canonical"]');
         const href = (link && link.getAttribute("href")) || "";
@@ -324,6 +324,20 @@
         const tag = document.querySelector('meta[itemprop="channelId"]');
         const content = (tag && tag.getAttribute("content")) || "";
         if (content.indexOf("UC") === 0) channelId = content;
+      }
+      // Watch pages have no channelMetadataRenderer: the channel that owns the
+      // video lives in ytInitialPlayerResponse (videoDetails.channelId, with
+      // the microformat owner as a fallback). Without this the letter buttons
+      // could never mount on /watch (§8.8 stage 9).
+      if (!channelId) {
+        const pr = window.ytInitialPlayerResponse;
+        const vd = pr && pr.videoDetails;
+        const mf = pr && pr.microformat && pr.microformat.playerMicroformatRenderer;
+        const cand = (vd && vd.channelId) || (mf && (mf.ownerChannelId || mf.externalChannelId)) || "";
+        if (typeof cand === "string" && cand.indexOf("UC") === 0) {
+          channelId = cand;
+          if (!title) title = txt((vd && vd.author) || (mf && mf.owner)) || "";
+        }
       }
       return { channelId: channelId, title: title };
     }

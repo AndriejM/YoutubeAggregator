@@ -30,7 +30,9 @@ export function check(name, cond, extra) {
 
 export function report() {
   console.log("passed " + passed + (failures.length ? ", FAILED " + failures.length : ""));
-  if (failures.length) process.exit(1);
+  // Always exit: the content scripts now keep a setInterval alive (the group
+  // button overlay tracks its anchor), which would otherwise hang the runner.
+  process.exit(failures.length ? 1 : 0);
 }
 
 export function clone(v) {

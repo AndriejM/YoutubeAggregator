@@ -383,9 +383,16 @@
   padding-bottom: 2px;
 }
 
-/* «Группа» in a channel page header (PLAN.md §8.8). It lives outside the
-   widget, so it declares its own theme variables. */
-.yga-gp-btn {
+/* Stage 9 (PLAN.md §8.8): per-profile letter buttons on channel and watch
+   pages. They live outside the widget, so they declare their own theme
+   variables. Each button carries --yga-gp-color (profile color) and
+   --yga-gp-fg (contrast text color) set from JS.
+
+   The host is an absolute overlay on document.body, never inserted into
+   YouTube's tree (that re-triggered the Stage 7 §5 whole-page flicker). JS
+   places it in document coordinates from the native anchor's bounding rect, so
+   a plain scroll does not move it and cannot make it jump. */
+.yga-gp-group {
   --yga-fg: var(--yt-spec-text-primary, #0f0f0f);
   --yga-fg-dim: var(--yt-spec-text-secondary, #606060);
   --yga-hover: var(--yt-spec-badge-bgcolor, rgba(0, 0, 0, 0.05));
@@ -393,32 +400,53 @@
   --yga-accent: #c00;
   --yga-surface: var(--yt-spec-general-background-a, #fff);
 
+  position: absolute;
+  z-index: 10000;
   display: inline-flex;
   align-items: center;
-  height: 32px;
-  margin: 4px 8px 0 0;
-  padding: 0 12px;
+  gap: 4px;
+  will-change: left, top;
+  transition: none;
+}
+
+/* The anchor has no layout box (collapsed header, mid-navigation): hide the
+   overlay instead of leaving it parked at the last known position. */
+.yga-gp-group.yga-gp-hidden {
+  display: none;
+}
+
+.yga-gp-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
   font-size: 13px;
-  color: var(--yga-fg);
-  background: transparent;
-  border: 1px solid var(--yga-border);
-  border-radius: 16px;
+  font-weight: 600;
+  color: var(--yga-gp-fg, #fff);
+  background: var(--yga-gp-color, #e05252);
+  border: 0;
+  border-radius: 50%;
   cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, box-shadow 0.12s ease;
 }
 
-.yga-gp-btn:hover {
-  background: var(--yga-hover);
+.yga-gp-letter:hover {
+  opacity: 1;
 }
 
-.yga-gp-btn:focus-visible {
+.yga-gp-letter:focus-visible {
   outline: 2px solid var(--yga-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
-.yga-gp-btn.yga-gp-set {
-  color: var(--yga-accent);
-  border-color: var(--yga-accent);
+/* The channel already belongs to a group of this profile. */
+.yga-gp-letter.yga-gp-on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--yga-surface, #fff), 0 0 0 4px var(--yga-gp-color, #e05252);
 }
 
 .yga-gp-menu {
@@ -437,8 +465,11 @@
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
 }
 
+/* Group row: name left, checkbox right (stage 9). */
 .yga-gp-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 7px 10px;
   font-family: var(--yt-font-family, "Roboto", "Arial", sans-serif);
   font-size: 13px;
@@ -454,9 +485,25 @@
   background: var(--yga-hover, rgba(0, 0, 0, 0.05));
 }
 
-.yga-gp-item.yga-active {
-  color: var(--yga-accent, #c00);
-  font-weight: 500;
+.yga-gp-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yga-gp-check {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--yga-accent, #c00);
+}
+
+.yga-gp-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--yga-fg-dim, #606060);
 }
 
 .yga-gp-quick {

@@ -391,6 +391,18 @@
     "message": "Assigns the channel you are watching to a group of the active profile.",
     "description": "Hint for the channel page group button toggle"
   },
+  "widgetWatchPageButton": {
+    "message": "Profile buttons on watch pages",
+    "description": "Toggle: show the profile letter buttons left of Like/Dislike"
+  },
+  "widgetWatchPageButtonHint": {
+    "message": "One small button per profile, left of the Like/Dislike buttons.",
+    "description": "Hint for the watch page profile buttons toggle"
+  },
+  "profileColor": {
+    "message": "Profile color",
+    "description": "Colorpicker label for a profile row"
+  },
   "profileSort": {
     "message": "Channel order",
     "description": "Select: sort order of channels inside widget groups"

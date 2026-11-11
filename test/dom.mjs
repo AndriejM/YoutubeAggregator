@@ -13,10 +13,11 @@ import {
 
 function parseSimple(s) {
   const sel = { tag: null, cls: [], attr: [] };
-  const re = /([.#]?)([A-Za-z0-9_-]+)|\[([A-Za-z0-9_-]+)(?:="([^"]*)")?\]/g;
+  const re = /([.#]?)([A-Za-z0-9_-]+)|\[([A-Za-z0-9_-]+)(\*?=)"([^"]*)"\]|\[([A-Za-z0-9_-]+)\]/g;
   let m;
   while ((m = re.exec(s))) {
-    if (m[3]) sel.attr.push({ name: m[3], value: m[4] });
+    if (m[3]) sel.attr.push({ name: m[3], op: m[4], value: m[5] });
+    else if (m[6]) sel.attr.push({ name: m[6] });
     else if (m[1] === ".") sel.cls.push(m[2]);
     else if (m[1] === "#") sel.attr.push({ name: "id", value: m[2] });
     else sel.tag = m[2].toLowerCase();
@@ -31,7 +32,9 @@ function matches(node, sel) {
   for (const a of sel.attr) {
     const v = node.getAttribute(a.name);
     if (v === null) return false;
-    if (a.value !== undefined && v !== a.value) return false;
+    if (a.value === undefined) continue;
+    if (a.op === "*=") { if (String(v).indexOf(a.value) < 0) return false; }
+    else if (v !== a.value) return false;
   }
   return true;
 }
@@ -77,7 +80,10 @@ class Element {
     return !!n.isRoot;
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
-  getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+  getAttribute(k) {
+    if (k === "class" && !this.hasAttribute("class")) return this.className || null;
+    return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null;
+  }
   hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); }
   removeAttribute(k) { delete this.attrs[k]; }
   set innerHTML(v) { this._html = v; } // static SVG markup only — never parsed here
@@ -103,8 +109,21 @@ class Element {
   }
   insertAdjacentElement(where, node) {
     if (where === "afterend" && this.parentNode) this.parentNode.insertBefore(node, this.nextSibling);
+    else if (where === "beforebegin" && this.parentNode) this.parentNode.insertBefore(node, this);
     else this.appendChild(node);
     return node;
+  }
+  getBoundingClientRect() {
+    // Hidden nodes (display:none / detached) report a zero box; tests set
+    // _hidden to exercise the hidden-anchor guard in group-picker.positionHost.
+    // _rect = [left, top, width, height] reproduces a live layout (the stage 9
+    // actions rows are packed edge to edge, so the default box is not enough).
+    if (this._hidden) return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+    if (this._rect) {
+      const [l, t, w, h] = this._rect;
+      return { left: l, top: t, right: l + w, bottom: t + h, width: w, height: h };
+    }
+    return { left: 100, top: 200, right: 160, bottom: 226, width: 60, height: 26 };
   }
   get nextSibling() {
     const p = this.parentNode;
@@ -144,9 +163,14 @@ class Element {
     return false;
   }
   closest(sel) {
-    const parsed = parseSimple(sel);
-    let n = this;
-    while (n && n.tagName) { if (matches(n, parsed)) return n; n = n.parentNode; }
+    for (const group of String(sel).split(",")) {
+      const parsed = parseSimple(group.trim());
+      let n = this;
+      while (n && n.tagName) {
+        if (matches(n, parsed)) return n;
+        n = n.parentNode;
+      }
+    }
     return null;
   }
   _query(sel, all) {
@@ -179,6 +203,11 @@ class Element {
   }
   dispatchEvent(ev) {
     ev.target = ev.target || this;
+    if (typeof ev.preventDefault !== "function") {
+      ev.defaultPrevented = false;
+      ev.preventDefault = function () { this.defaultPrevented = true; };
+      ev.stopPropagation = function () { ev._stopped = true; };
+    }
     let n = this;
     while (n) {
       ev.currentTarget = n;
@@ -384,6 +413,13 @@ async function deliver() {
   }
 }
 
+// Stage 9: group-picker.js keys off location.pathname and the page bridge.
+// The initial path is neutral so its boot() is a no-op until the scenario
+// navigates.
+globalThis.location = { pathname: "/" };
+globalThis.innerWidth = 1280;
+globalThis.innerHeight = 1440;
+
 for (const f of [
   "content/selectors.js",
   "content/state.js",
@@ -392,6 +428,7 @@ for (const f of [
   "content/counters.js",
   "content/theme.js",
   "content/widget.js",
+  "content/group-picker.js",
   "config/panel.js",
   "config/panel-sections.js"
 ]) {
@@ -400,6 +437,9 @@ for (const f of [
 
 const yga = globalThis.yga;
 yga.i18n = (k) => k;
+yga.bridge = {
+  call: async (cmd) => (cmd === "getPageChannel" ? { channelId: CH1, title: "One" } : null)
+};
 // bootstrap.js wires subs→render; the harness mirrors it so a profile switch
 // repaints rows the same way the widget does in the browser.
 yga.state.onSubsChanged((subs) => yga.widget.render(subs));
@@ -765,6 +805,695 @@ env.sandbox.chrome.storage.local
     );
     yga.panel.close();
     await flush(10);
+
+    // --- stage 9: per-profile letter buttons (PLAN.md §8.8) ----------------
+    // A channel page: the buttons mount right after the subscribe cluster.
+    // Fixture mirrors live YouTube 2026: the header is a light-DOM #page-header
+    // and the actions row is the view-model component (the legacy
+    // ytd-subscribe-button-renderer is gone). A hidden duplicate of the row is
+    // appended first — anchoring to it is what put the buttons off screen.
+    globalThis.location.pathname = "/channel/" + CH1;
+    const pageHeader = document.createElement("div");
+    pageHeader.setAttribute("id", "page-header");
+    const hiddenActions = document.createElement("yt-flexible-actions-view-model");
+    hiddenActions.className = "yt-flexible-actions-view-model";
+    hiddenActions._hidden = true;
+    const subBtn = document.createElement("yt-flexible-actions-view-model");
+    subBtn.className = "yt-flexible-actions-view-model";
+    pageHeader.appendChild(hiddenActions);
+    pageHeader.appendChild(subBtn);
+    root.appendChild(pageHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+
+    const gpHost = document.querySelector("[data-yga-group-buttons]");
+    check("stage9: letter buttons mount on a channel page", !!gpHost);
+    check(
+      "stage9: buttons are a body overlay placed right of the subscribe cluster",
+      !!gpHost && gpHost.parentNode === document.body &&
+        !pageHeader.contains(gpHost) &&
+        gpHost.styleVars.left === "166px" && gpHost.styleVars.top === "200px",
+      JSON.stringify(gpHost && gpHost.styleVars)
+    );
+    check(
+      "stage9: overlay is visible, not parked on the hidden duplicate actions row",
+      !!gpHost && !gpHost.classList.contains("yga-gp-hidden")
+    );
+    const letters = gpHost ? gpHost.querySelectorAll(".yga-gp-letter") : [];
+    check(
+      "stage9: one button per profile, first letter as label",
+      letters.length === 3 && letters.map((b) => b.textContent).join("") === "ACG",
+      JSON.stringify(letters.map((b) => b.textContent))
+    );
+    check(
+      "stage9: buttons carry the profile color",
+      letters.every((b) => /^#[0-9a-f]{6}$/i.test(b.styleVars["--yga-gp-color"] || "")),
+      JSON.stringify(letters.map((b) => b.styleVars["--yga-gp-color"]))
+    );
+
+    // The p3 button ("G") opens the dropdown of p3's groups.
+    const music = yga.groups.list(p3.id).find((g) => g.name === "Music");
+    const gBtn = letters.find((b) => b.getAttribute("data-yga-profile") === p3.id);
+    gBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    const gpMenu = document.querySelector("[data-yga-group-menu]");
+    check("stage9: click opens the group dropdown", !!gpMenu);
+    const gpChecks = gpMenu ? gpMenu.querySelectorAll(".yga-gp-check") : [];
+    const musicRow = gpChecks.length === 1 ? gpChecks[0].closest(".yga-gp-item") : null;
+    check(
+      "stage9: one checkbox row per group, unchecked for a free channel",
+      !!musicRow && musicRow.querySelector(".yga-gp-name").textContent === "Music" &&
+        gpChecks[0].checked === false,
+      JSON.stringify(musicRow && musicRow.textContent)
+    );
+    gpChecks[0].checked = true;
+    gpChecks[0].dispatchEvent({ type: "change" });
+    await flush(40);
+    check(
+      "stage9: checking a row assigns the channel to the group",
+      (await yga.profiles.getComposition(p3.id))[CH1].groupId === (music && music.id),
+      JSON.stringify((await yga.profiles.getComposition(p3.id))[CH1])
+    );
+
+    docEvents.fire("pointerdown", { target: root });
+    await flush(10);
+    check("stage9: outside click closes the dropdown", !document.querySelector("[data-yga-group-menu]"));
+
+    // Re-open and uncheck → the channel leaves the group (§8.8 stage 9).
+    gBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    const menu2 = document.querySelector("[data-yga-group-menu]");
+    const check2 = menu2 && menu2.querySelector(".yga-gp-check");
+    check("stage9: checkbox reflects the current group", !!check2 && check2.checked === true);
+    check2.checked = false;
+    check2.dispatchEvent({ type: "change" });
+    await flush(40);
+    check(
+      "stage9: unchecking removes the channel from the group",
+      (await yga.profiles.getComposition(p3.id))[CH1].groupId === null,
+      JSON.stringify((await yga.profiles.getComposition(p3.id))[CH1])
+    );
+
+    // Watch page: the buttons mount left of Like/Dislike. Again the live tag is
+    // the view-model component, not the legacy renderer.
+    globalThis.location.pathname = "/watch?v=x";
+    const actions = document.createElement("div");
+    actions.setAttribute("id", "actions");
+    const likeDislike = document.createElement("yt-segmented-like-dislike-button-view-model");
+    likeDislike.className = "yt-segmented-like-dislike-button-view-model";
+    actions.appendChild(likeDislike);
+    root.appendChild(actions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWatch = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: watch page overlays the buttons left of Like/Dislike (never inside the actions row)",
+      !!gpWatch && gpWatch.parentNode === document.body &&
+        !actions.contains(gpWatch) &&
+        gpWatch.styleVars.left === "64px" && gpWatch.styleVars.top === "200px",
+      JSON.stringify(gpWatch && gpWatch.styleVars)
+    );
+
+    // Profile colorpicker (§9.2.1): the panel edits profile colors live and
+    // the letter buttons repaint.
+    yga.panel.open("profiles");
+    await flush(40);
+    const psection = content.querySelector('[data-section="profiles"]');
+    const colorInputs = psection ? psection.querySelectorAll(".yga-panel-color") : [];
+    check(
+      "stage9: every profile row carries a colorpicker",
+      colorInputs.length === 3,
+      String(colorInputs.length)
+    );
+    colorInputs[0].value = "#123456";
+    colorInputs[0].dispatchEvent({ type: "change" });
+    await flush(40);
+    check(
+      "stage9: colorpicker writes the profile color",
+      yga.profiles.get("p_1").color === "#123456",
+      JSON.stringify(yga.profiles.get("p_1"))
+    );
+    const gpAfter = document.querySelector("[data-yga-group-buttons]");
+    const aBtn = gpAfter && gpAfter.querySelector('[data-yga-profile="p_1"]');
+    check(
+      "stage9: letter button repaints with the new profile color",
+      !!aBtn && aBtn.styleVars["--yga-gp-color"] === "#123456",
+      JSON.stringify(aBtn && aBtn.styleVars)
+    );
+    yga.panel.close();
+    await flush(10);
+
+    // --- stage 9 regression: late anchor (real YouTube timing) --------------
+    // yt-navigate-finish fires before the subscribe cluster renders, so the
+    // first mount finds no anchor. The picker must retry and mount once the
+    // anchor appears — this is the bug that hid the buttons in the browser.
+    const oldHeader = document.querySelector("#page-header");
+    if (oldHeader) oldHeader.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40); // 80ms: inside the retry window, anchor still absent
+    check(
+      "stage9: no buttons while the subscribe anchor is missing",
+      !document.querySelector("[data-yga-group-buttons]")
+    );
+    // The late anchor uses the LEGACY tag: the chain must keep matching older
+    // YouTube builds, not only the 2026 view-model components.
+    const lateHeader = document.createElement("div");
+    lateHeader.setAttribute("id", "page-header");
+    lateHeader.appendChild(document.createElement("ytd-subscribe-button-renderer"));
+    root.appendChild(lateHeader);
+    await flush(300); // 600ms: past the 400ms retry tick
+    const gpLate = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: buttons mount once the late anchor appears (retry)",
+      !!gpLate && gpLate.querySelectorAll(".yga-gp-letter").length === 3,
+      JSON.stringify(gpLate && gpLate.querySelectorAll(".yga-gp-letter").length)
+    );
+
+    // --- stage 9: shadow-piercing fallback ---------------------------------
+    // Live desktop YouTube renders its Polymer content into the LIGHT DOM
+    // (ShadyDOM force/noPatch), which is what the fixtures above model. findDeep
+    // stays as the fallback for a native-shadow build: if the subscribe cluster
+    // ever moves behind a real shadow root, the picker must still find it and
+    // mount the overlay — standalone, without leaning on another extension.
+    const staleHeader = document.querySelector("#page-header");
+    if (staleHeader) staleHeader.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    const shadowHost = document.createElement("ytd-page-header");
+    const shadowRoot = document.createElement("div");
+    shadowRoot.appendChild(document.createElement("ytd-subscribe-button-renderer"));
+    shadowHost.shadowRoot = shadowRoot; // open shadow root, invisible to querySelector
+    root.appendChild(shadowHost);
+    check(
+      "stage9: a light-DOM query cannot see the shadowed subscribe anchor",
+      !document.querySelector("ytd-subscribe-button-renderer")
+    );
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpShadow = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: buttons mount by piercing the shadow root (standalone)",
+      !!gpShadow && gpShadow.querySelectorAll(".yga-gp-letter").length === 3,
+      JSON.stringify(gpShadow && gpShadow.querySelectorAll(".yga-gp-letter").length)
+    );
+    shadowHost.remove();
+
+    // --- stage 9: browser regressions from the 2026-11-10 check -------------
+    // Channel: when the view-model actions row is absent, anchoring to the
+    // full-width #page-header put the buttons at the viewport edge. The picker
+    // must fall back to the visible Subscribe button inside the header.
+    const staleHeader2 = document.querySelector("#page-header");
+    if (staleHeader2) staleHeader2.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    const wideHeader = document.createElement("div");
+    wideHeader.setAttribute("id", "page-header");
+    const subscribeBtn = document.createElement("button");
+    subscribeBtn.textContent = "Subscribe";
+    wideHeader.appendChild(subscribeBtn);
+    root.appendChild(wideHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWide = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: full-width header anchors to Subscribe, not the header edge",
+      !!gpWide && gpWide.getAttribute("data-yga-anchor") === "channel-text" &&
+        gpWide.styleVars.left === "166px",
+      JSON.stringify(gpWide && [gpWide.getAttribute("data-yga-anchor"), gpWide.styleVars.left])
+    );
+
+    // Watch: the cluster tag/class probes can both miss, but the Like button's
+    // accessible label is stable. Anchor to that button, not the whole actions row.
+    const oldActions = document.querySelector("#actions");
+    if (oldActions) oldActions.remove();
+    globalThis.location.pathname = "/watch?v=x";
+    const watchActions = document.createElement("div");
+    watchActions.setAttribute("id", "actions");
+    const likeBtn = document.createElement("button");
+    likeBtn.setAttribute("aria-label", "like this video along with 123 other people");
+    watchActions.appendChild(likeBtn);
+    root.appendChild(watchActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWatchText = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: watch page anchors to the accessible Like button",
+      !!gpWatchText && gpWatchText.getAttribute("data-yga-anchor") === "watch-like" &&
+        gpWatchText.styleVars.left === "64px",
+      JSON.stringify(gpWatchText && [gpWatchText.getAttribute("data-yga-anchor"), gpWatchText.styleVars.left])
+    );
+
+    // Russian UI: "Мне нравится" contains the dislike phrase "не нравится" as a
+    // substring, so the dislike guard must not reject the Like button.
+    const oldActionsRu = document.querySelector("#actions");
+    if (oldActionsRu) oldActionsRu.remove();
+    globalThis.location.pathname = "/watch?v=x";
+    const watchActionsRu = document.createElement("div");
+    watchActionsRu.setAttribute("id", "actions");
+    const dislikeRu = document.createElement("button");
+    dislikeRu.setAttribute("aria-label", "Не нравится");
+    const likeRu = document.createElement("button");
+    likeRu.setAttribute("aria-label", "Мне нравится");
+    watchActionsRu.appendChild(dislikeRu);
+    watchActionsRu.appendChild(likeRu);
+    root.appendChild(watchActionsRu);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWatchRu = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: Russian Like is not rejected as Dislike",
+      !!gpWatchRu && gpWatchRu.getAttribute("data-yga-anchor") === "watch-like" &&
+        gpWatchRu.styleVars.left === "64px",
+      JSON.stringify(gpWatchRu && [gpWatchRu.getAttribute("data-yga-anchor"), gpWatchRu.styleVars.left])
+    );
+
+    // Native-shadow fallback: if the Like button is behind an open shadow root,
+    // the text anchor must still be found by piercing the shadow tree.
+    const oldActionsDeep = document.querySelector("#actions");
+    if (oldActionsDeep) oldActionsDeep.remove();
+    globalThis.location.pathname = "/watch?v=x";
+    const commentLike = document.createElement("button");
+    commentLike.setAttribute("aria-label", "Like");
+    root.appendChild(commentLike);
+    const watchShadowHost = document.createElement("yt-watch-metadata");
+    const watchShadowRoot = document.createElement("div");
+    const likeShadow = document.createElement("button");
+    likeShadow.setAttribute("aria-label", "Мне нравится");
+    watchShadowRoot.appendChild(likeShadow);
+    watchShadowHost.shadowRoot = watchShadowRoot;
+    root.appendChild(watchShadowHost);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWatchDeep = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: shadowed Like button is found by the deep text anchor",
+      !!gpWatchDeep && gpWatchDeep.getAttribute("data-yga-anchor") === "watch-like-deep" &&
+        gpWatchDeep.styleVars.left === "64px",
+      JSON.stringify(gpWatchDeep && [gpWatchDeep.getAttribute("data-yga-anchor"), gpWatchDeep.styleVars.left])
+    );
+    watchShadowHost.remove();
+    commentLike.remove();
+
+    // --- stage 9: live 2026-11-11 browser probe shapes ----------------------
+    // The probe (test/probe-anchor.js) showed the channel actions row reaching
+    // the viewport edge while the Subscribe button sits in a native shadow root
+    // (ShadyDOM force mode is off) and only Sponsor is light DOM. Anchoring to
+    // the row clamped the overlay to the right screen edge.
+    globalThis.innerWidth = 1030;
+    const oldProbeHeader = document.querySelector("#page-header");
+    if (oldProbeHeader) oldProbeHeader.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    const probeHeader = document.createElement("div");
+    probeHeader.setAttribute("id", "page-header");
+    probeHeader._rect = [72, 194, 945, 216];
+    const probeRow = document.createElement("yt-flexible-actions-view-model");
+    probeRow.className = "yt-flexible-actions-view-model";
+    probeRow._rect = [293, 358, 680, 40];
+    const probeSponsor = document.createElement("button");
+    probeSponsor.setAttribute("aria-label", "Стать спонсором этого канала");
+    probeSponsor._rect = [491, 358, 176, 40];
+    const probeRowShadow = document.createElement("div");
+    const probeSubscribe = document.createElement("button");
+    probeSubscribe.setAttribute("aria-label", "Вы подписаны");
+    probeSubscribe._rect = [675, 358, 115, 40];
+    probeRowShadow.appendChild(probeSubscribe);
+    probeRow.shadowRoot = probeRowShadow;
+    probeRow.appendChild(probeSponsor);
+    probeHeader.appendChild(probeRow);
+    root.appendChild(probeHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpProbeChannel = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: shadowed Subscribe wins over the actions row (no edge clamp)",
+      !!gpProbeChannel &&
+        gpProbeChannel.getAttribute("data-yga-anchor") === "channel-text-deep" &&
+        gpProbeChannel.styleVars.left === "796px" && gpProbeChannel.styleVars.top === "365px",
+      JSON.stringify(gpProbeChannel &&
+        [gpProbeChannel.getAttribute("data-yga-anchor"), gpProbeChannel.styleVars.left, gpProbeChannel.styleVars.top])
+    );
+
+    // Watch: the actions row starts at x=16 and is packed edge to edge, so the
+    // requested slot left of Like does not exist. The overlay must take the
+    // free gap after the last button of the row instead of covering controls.
+    const oldProbeActions = document.querySelector("#actions");
+    if (oldProbeActions) oldProbeActions.remove();
+    globalThis.location.pathname = "/watch?v=x";
+    const probeActions = document.createElement("div");
+    probeActions.setAttribute("id", "actions");
+    probeActions._rect = [16, 738, 649, 36];
+    const probeLike = document.createElement("button");
+    probeLike.setAttribute("aria-label", "поставить отметку \"Нравится\" (это видео понравилось 437 пользователям)");
+    probeLike._rect = [16, 738, 86, 40];
+    const probeDislike = document.createElement("button");
+    probeDislike.setAttribute("aria-label", "Поставить отметку \"Не нравится\"");
+    probeDislike._rect = [102, 738, 70, 40];
+    const probeShare = document.createElement("button");
+    probeShare.setAttribute("aria-label", "Поделиться");
+    probeShare._rect = [180, 738, 40, 40];
+    const probeMore = document.createElement("button");
+    probeMore.setAttribute("aria-label", "Ещё");
+    probeMore._rect = [324, 738, 40, 40];
+    for (const b of [probeLike, probeDislike, probeShare, probeMore]) probeActions.appendChild(b);
+    root.appendChild(probeActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpProbeWatch = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: quoted RU Dislike is not the Like anchor",
+      !!gpProbeWatch && gpProbeWatch.getAttribute("data-yga-anchor") === "watch-like" &&
+        gpProbeWatch.styleVars.left !== "10px",
+      JSON.stringify(gpProbeWatch &&
+        [gpProbeWatch.getAttribute("data-yga-anchor"), gpProbeWatch.styleVars.left])
+    );
+    check(
+      "stage9: packed watch row takes the free gap after the last button",
+      !!gpProbeWatch && gpProbeWatch.styleVars.left === "370px" &&
+        gpProbeWatch.styleVars.top === "745px",
+      JSON.stringify(gpProbeWatch && gpProbeWatch.styleVars)
+    );
+    probeHeader.remove();
+    probeActions.remove();
+globalThis.innerWidth = 1280;
+
+    // --- stage 9: language-independent structural anchors -------------------
+    // User report 2026-11-11: on channels whose labels are not in the RU/EN
+    // text lists the anchors missed and the overlay jumped around. YouTube
+    // stamps the subscribe view-model tag/class in every UI language, so the
+    // structural probe must anchor with NO label text anywhere.
+    const oldStructHeader = document.querySelector("#page-header");
+    if (oldStructHeader) oldStructHeader.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    const structHeader = document.createElement("div");
+    structHeader.setAttribute("id", "page-header");
+    structHeader._rect = [72, 194, 945, 216];
+    const structRow = document.createElement("yt-flexible-actions-view-model");
+    structRow.className = "yt-flexible-actions-view-model";
+    structRow._rect = [293, 358, 680, 40];
+    const structSubscribe = document.createElement("yt-subscribe-button-view-model");
+    structSubscribe.className = "yt-subscribe-button-view-model";
+    structSubscribe._rect = [293, 358, 120, 40];
+    const structSponsor = document.createElement("yt-button-view-model");
+    structSponsor.className = "yt-button-view-model";
+    structSponsor._rect = [421, 358, 176, 40];
+    structRow.appendChild(structSubscribe);
+    structRow.appendChild(structSponsor);
+    structHeader.appendChild(structRow);
+    root.appendChild(structHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpStruct = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: subscribe view-model anchors without any label text (language-independent)",
+      !!gpStruct &&
+        gpStruct.getAttribute("data-yga-anchor") === "channel-subscribe" &&
+        gpStruct.styleVars.left === "603px" && gpStruct.styleVars.top === "365px",
+      JSON.stringify(gpStruct &&
+        [gpStruct.getAttribute("data-yga-anchor"), gpStruct.styleVars.left, gpStruct.styleVars.top])
+    );
+
+    // A wrapped actions row must not drag the overlay to the second line:
+    // only boxes on the anchor's own line may push the slot (user report:
+    // «прыгнули на две строчки вниз» on a channel with a wrapping row).
+    const oldWrapActions = document.querySelector("#actions");
+    if (oldWrapActions) oldWrapActions.remove();
+    globalThis.location.pathname = "/watch?v=x";
+    const wrapActions = document.createElement("div");
+    wrapActions.setAttribute("id", "actions");
+    wrapActions._rect = [16, 738, 649, 80];
+    const wrapLike = document.createElement("button");
+    wrapLike.setAttribute("aria-label", "Нравится");
+    wrapLike._rect = [16, 738, 86, 40];
+    const wrapSave = document.createElement("button");
+    wrapSave.setAttribute("aria-label", "Сохранить");
+    wrapSave._rect = [16, 782, 100, 40];
+    wrapActions.appendChild(wrapLike);
+    wrapActions.appendChild(wrapSave);
+    root.appendChild(wrapActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWrap = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: wrapped row keeps the overlay on the anchor's line",
+      !!gpWrap && gpWrap.styleVars.top === "745px" && gpWrap.styleVars.left === "108px",
+      JSON.stringify(gpWrap && gpWrap.styleVars)
+    );
+    structHeader.remove();
+    wrapActions.remove();
+
+    // Dislike-only view-models carry the stamped class "yt-dislike-button-view-
+    // model", which contains "like-button-view-model" as a substring, so the
+    // structural selector matches them too. Their accessible name is just the
+    // count, so the text guard misses them and — being smaller than the like
+    // button — they would win "smallest". The class guard must reject them.
+    globalThis.location.pathname = "/watch?v=x";
+    const disActions = document.createElement("div");
+    disActions.setAttribute("id", "actions");
+    disActions._rect = [16, 738, 649, 36];
+    const disLike = document.createElement("yt-like-button-view-model");
+    disLike.className = "yt-like-button-view-model";
+    disLike._rect = [16, 738, 86, 40];
+    disLike.textContent = "437 тыс.";
+    const disDislike = document.createElement("yt-dislike-button-view-model");
+    disDislike.className = "yt-dislike-button-view-model";
+    disDislike._rect = [102, 738, 50, 40];
+    disDislike.textContent = "12 тыс.";
+    disActions.appendChild(disLike);
+    disActions.appendChild(disDislike);
+    root.appendChild(disActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpDis = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: count-only dislike view-model never beats the like view-model",
+      !!gpDis && gpDis.getAttribute("data-yga-anchor") === "watch-like-struct" &&
+        gpDis.styleVars.left === "158px" && gpDis.styleVars.top === "745px",
+      JSON.stringify(gpDis &&
+        [gpDis.getAttribute("data-yga-anchor"), gpDis.styleVars.left, gpDis.styleVars.top])
+    );
+    disActions.remove();
+
+    // The legacy chain branch must not take the first boxed match either: the
+    // 2026-11-11 browser check anchored to a wide hidden ghost (#like-button
+    // template) on both videos. Width guard + smallest wins must pick the real
+    // button instead.
+    const ghostActions = document.createElement("div");
+    ghostActions.setAttribute("id", "actions");
+    ghostActions._rect = [16, 738, 649, 36];
+    const ghostLike = document.createElement("div");
+    ghostLike.setAttribute("id", "like-button");
+    ghostLike._rect = [0, 738, 600, 40];
+    const realLike = document.createElement("ytd-like-button-renderer");
+    realLike._rect = [16, 738, 86, 40];
+    ghostActions.appendChild(ghostLike);
+    ghostActions.appendChild(realLike);
+    root.appendChild(ghostActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpGhost = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: chain branch skips the wide ghost duplicate for the real like",
+      !!gpGhost && gpGhost.getAttribute("data-yga-anchor") === "watch-like-id" &&
+        gpGhost.styleVars.left === "108px" && gpGhost.styleVars.top === "745px",
+      JSON.stringify(gpGhost &&
+        [gpGhost.getAttribute("data-yga-anchor"), gpGhost.styleVars.left, gpGhost.styleVars.top])
+    );
+    ghostActions.remove();
+
+    // --- stage 9: late like cluster upgrades a row anchor (live 2026-11-11) --
+    // Mount caught #actions before the like cluster rendered, so the anchor
+    // stuck on watch-deep-actions and the overlay sat on top of Subscribe. The
+    // row stays connected forever, so only a rank-aware reanchor can move the
+    // overlay once the cluster (here: the legacy #top-level-buttons-computed
+    // the 2026 probe found) appears.
+    globalThis.location.pathname = "/watch?v=x";
+    const lateActions = document.createElement("div");
+    lateActions.setAttribute("id", "actions");
+    lateActions._rect = [585, 891, 400, 43];
+    root.appendChild(lateActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpLateRow = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: empty actions row anchors as watch-deep-actions",
+      !!gpLateRow && gpLateRow.getAttribute("data-yga-anchor") === "watch-deep-actions",
+      JSON.stringify(gpLateRow && gpLateRow.getAttribute("data-yga-anchor"))
+    );
+    const lateCluster = document.createElement("div");
+    lateCluster.setAttribute("id", "top-level-buttons-computed");
+    lateCluster.className = "top-level-buttons";
+    lateCluster._rect = [693, 894, 196, 40];
+    const lateLike = document.createElement("button");
+    lateLike.setAttribute("aria-label", "поставить отметку \"Нравится\" (это видео понравилось 89 пользователям)");
+    lateLike._rect = [693, 894, 78, 40];
+    lateCluster.appendChild(lateLike);
+    lateActions.appendChild(lateCluster);
+    await flush(200); // past the 250ms tracker tick; first upgrade attempt is immediate
+    const gpUpgraded = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: late like cluster upgrades the row anchor off Subscribe",
+      !!gpUpgraded && gpUpgraded.getAttribute("data-yga-anchor") === "watch-like-struct" &&
+        gpUpgraded.styleVars.left === "657px" && gpUpgraded.styleVars.top === "901px",
+      JSON.stringify(gpUpgraded &&
+        [gpUpgraded.getAttribute("data-yga-anchor"), gpUpgraded.styleVars.left, gpUpgraded.styleVars.top])
+    );
+    lateActions.remove();
+
+    // --- stage 9: off-screen anchor hides the overlay (live 2026-11-11) ------
+    // Scrolling past the anchor used to clamp top to 4px and park the buttons
+    // at the top edge of the viewport; they must leave with the anchor instead.
+    const goneActions = document.createElement("div");
+    goneActions.setAttribute("id", "actions");
+    goneActions._rect = [585, -140, 400, 43];
+    const goneCluster = document.createElement("div");
+    goneCluster.setAttribute("id", "top-level-buttons-computed");
+    goneCluster.className = "top-level-buttons";
+    goneCluster._rect = [693, -140, 196, 40];
+    goneActions.appendChild(goneCluster);
+    root.appendChild(goneActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpGone = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: anchor scrolled above the viewport hides the overlay",
+      !!gpGone && gpGone.getAttribute("data-yga-anchor") === "watch-like-struct" &&
+        gpGone.classList.contains("yga-gp-hidden"),
+      JSON.stringify(gpGone &&
+        [gpGone.getAttribute("data-yga-anchor"), gpGone.classList.contains("yga-gp-hidden")])
+    );
+    goneActions.remove();
+
+    // --- stage 9: the masthead band (live 2026-11-11) -----------------------
+    // Dropping the top clamp let a partially scrolled anchor slide the buttons
+    // half past the top edge. The overlay must be gone as soon as the anchor is
+    // not FULLY inside the band the fixed masthead leaves.
+    const masthead = document.createElement("ytd-masthead");
+    masthead._rect = [0, 0, 1280, 56];
+    root.appendChild(masthead);
+    const bandActions = document.createElement("div");
+    bandActions.setAttribute("id", "actions");
+    bandActions._rect = [16, 40, 649, 36];
+    const bandCluster = document.createElement("div");
+    bandCluster.setAttribute("id", "top-level-buttons-computed");
+    bandCluster.className = "top-level-buttons";
+    bandCluster._rect = [16, 40, 196, 40];
+    bandActions.appendChild(bandCluster);
+    root.appendChild(bandActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpBand = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: anchor under the masthead hides the overlay instead of sliding off the edge",
+      !!gpBand && gpBand.getAttribute("data-yga-anchor") === "watch-like-struct" &&
+        gpBand.classList.contains("yga-gp-hidden"),
+      JSON.stringify(gpBand &&
+        [gpBand.dataset.ygaTopBound, gpBand.classList.contains("yga-gp-hidden")])
+    );
+    bandActions._rect = [16, 70, 649, 36];
+    bandCluster._rect = [16, 70, 196, 40];
+    windowEvents.fire("scroll", {});
+    await flush(40);
+    check(
+      "stage9: anchor back below the masthead shows the overlay again",
+      !!gpBand && !gpBand.classList.contains("yga-gp-hidden") &&
+        gpBand.styleVars.left === "218px" && gpBand.styleVars.top === "77px",
+      JSON.stringify(gpBand && [gpBand.styleVars.left, gpBand.styleVars.top])
+    );
+    bandActions.remove();
+    masthead.remove();
+
+    // --- stage 9: a sticky channel header must not drag the buttons to the top -
+    // Live 2026-11-11: on channel pages the collapsed header pins under the
+    // masthead, so the subscribe anchor keeps its viewport top while the page
+    // scrolls and the overlay stuck to the top edge. An anchor that does not
+    // move while the page does is pinned: the overlay leaves with the header.
+    globalThis.location.pathname = "/channel/" + CH1;
+    const pinHeader = document.createElement("div");
+    pinHeader.setAttribute("id", "page-header");
+    const pinSubscribe = document.createElement("yt-subscribe-button-view-model");
+    pinSubscribe.className = "yt-subscribe-button-view-model";
+    pinHeader.appendChild(pinSubscribe);
+    root.appendChild(pinHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpPin = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: channel overlay follows the subscribe anchor while it scrolls",
+      !!gpPin && gpPin.getAttribute("data-yga-anchor") === "channel-subscribe" &&
+        !gpPin.classList.contains("yga-gp-hidden"),
+      JSON.stringify(gpPin && gpPin.getAttribute("data-yga-anchor"))
+    );
+    // Two scroll ticks with the anchor's viewport top unchanged = pinned.
+    globalThis.scrollY = 900;
+    pinSubscribe._rect = [100, 200, 60, 26];
+    await new Promise((r) => setTimeout(r, 300));
+    await flush(10);
+    globalThis.scrollY = 1800;
+    await new Promise((r) => setTimeout(r, 300));
+    await flush(10);
+    check(
+      "stage9: pinned (sticky-header) anchor hides the overlay",
+      !!gpPin && gpPin.dataset.ygaPinned === "1" && gpPin.classList.contains("yga-gp-hidden"),
+      JSON.stringify(gpPin && [gpPin.dataset.ygaPinned, gpPin.classList.contains("yga-gp-hidden")])
+    );
+    // Scrolling back: the header expands, the anchor moves again → visible.
+    globalThis.scrollY = 400;
+    pinSubscribe._rect = [100, 640, 60, 26];
+    await new Promise((r) => setTimeout(r, 300));
+    await flush(10);
+    check(
+      "stage9: the overlay returns once the anchor scrolls with the page",
+      !!gpPin && gpPin.dataset.ygaPinned === "0" && !gpPin.classList.contains("yga-gp-hidden") &&
+        gpPin.styleVars.top === "1040px",
+      JSON.stringify(gpPin && [gpPin.dataset.ygaPinned, gpPin.styleVars.top])
+    );
+    globalThis.scrollY = 0;
+    pinHeader.remove();
+
+    // --- stage 9: the held slot survives row churn (watch jumping) ----------
+    // The actions row re-renders during scroll; every re-pick from a changed box
+    // set flipped the overlay to another gap. The slot already held is kept
+    // while it stays free, and only re-picked once it is blocked.
+    globalThis.location.pathname = "/watch?v=x";
+    const churnActions = document.createElement("div");
+    churnActions.setAttribute("id", "actions");
+    churnActions._rect = [16, 738, 649, 36];
+    const churnLike = document.createElement("button");
+    churnLike.setAttribute("aria-label", "поставить отметку \"Нравится\" (это видео понравилось 437 пользователям)");
+    churnLike._rect = [16, 738, 86, 40];
+    const churnGhost = document.createElement("div");
+    churnGhost.className = "wide-button-ghost";
+    churnGhost._rect = [16, 738, 500, 40];
+    churnActions.appendChild(churnLike);
+    churnActions.appendChild(churnGhost);
+    root.appendChild(churnActions);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpChurn = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: packed row with a wide box takes the gap after it",
+      !!gpChurn && gpChurn.styleVars.left === "522px" && gpChurn.styleVars.top === "745px",
+      JSON.stringify(gpChurn && gpChurn.styleVars)
+    );
+    churnGhost.remove();
+    await new Promise((r) => setTimeout(r, 300)); // the 250ms tick drops the box cache
+    await flush(10);
+    check(
+      "stage9: row churn does not flip the overlay to another gap",
+      gpChurn.styleVars.left === "522px",
+      JSON.stringify(gpChurn.styleVars)
+    );
+    const churnBlocker = document.createElement("button");
+    churnBlocker.setAttribute("aria-label", "Поделиться");
+    churnBlocker._rect = [500, 738, 60, 40];
+    churnActions.appendChild(churnBlocker);
+    await new Promise((r) => setTimeout(r, 300));
+    await flush(10);
+    check(
+      "stage9: a blocked slot is re-picked, not held over the control",
+      gpChurn.styleVars.left === "566px",
+      JSON.stringify(gpChurn.styleVars)
+    );
+    churnActions.remove();
 
     // --- incremental render (PLAN.md §18.3) --------------------------------
     // A re-render of an unchanged tree must not rebuild the sidebar: the same

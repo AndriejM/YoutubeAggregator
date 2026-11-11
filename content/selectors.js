@@ -33,12 +33,82 @@ window.yga = window.yga || {};
       "#page-manager",
       "ytd-page-manager"
     ],
-    // Channel page header (§8.8): the «Группа» button lives next to the title.
+    // Stage 9 (§8.8): anchors for the letter-button overlay. We only READ their
+    // bounding rect; we never insert into YouTube's tree — that re-renders the
+    // page on every navigation (Stage 7 §5).
+    //
+    // Live-YouTube finding 2026-11-10: the desktop page boots with
+    // `window.ShadyDOM={force:true,noPatch:true}`, so Polymer's "shadow" content
+    // is rendered into the LIGHT DOM and plain document.querySelector reaches it
+    // (PocketTube's live selectors rely on exactly this). The old assumption
+    // that these anchors hide behind open shadow roots was wrong — what actually
+    // broke the buttons was the tag names: the 2026 header/actions row is built
+    // from the view-model components (`pageHeaderViewModel` →
+    // `yt-flexible-actions-view-model`, `segmentedLikeDislikeButtonViewModel` →
+    // `yt-segmented-like-dislike-button-view-model`), while our chains only
+    // listed the legacy `ytd-*-renderer` names, which no longer exist.
+    //
+    // Every chain is therefore modern-first, then the legacy renderer, then a
+    // `[class*=…]` attribute probe: YouTube stamps every view-model element with
+    // a `.yt-<name>-view-model` class, so a substring match survives a rename of
+    // the tag. Resolve with selectors.findVisible — the first match that has a
+    // box (the DOM keeps hidden templates of both clusters).
     channelHeader: [
-      "ytd-page-header #title-container-inner",
-      "ytd-page-header #text-container",
-      "ytd-page-header #top-bar",
+      "#page-header yt-flexible-actions-view-model",
+      "yt-flexible-actions-view-model",
+      '[class*="flexible-actions-view-model"]',
+      "#page-header",
+      "#page-header-inner",
       "ytd-page-header"
+    ],
+    // Stage 9: the subscribe/sponsor cluster on a channel page. The letter
+    // buttons sit just to its right (overlay positioned from this rect).
+    subscribeButton: [
+      "#page-header yt-flexible-actions-view-model",
+      "yt-flexible-actions-view-model",
+      '[class*="flexible-actions-view-model"]',
+      "#subscribe-button",
+      "ytd-subscribe-button-renderer",
+      '[class*="subscribe-button"]'
+    ],
+    // Stage 9: the Like/Dislike cluster on a watch page. The letter buttons sit
+    // just to its left (overlay positioned from this rect).
+    likeDislike: [
+      // Precise, tag-independent probes first: the like button's view model
+      // carries accessibilityId "id.video.like.button" (confirmed in live
+      // ytInitialData 2026-11-10), which YouTube renders as the element id /
+      // aria-labelledby target. Immune to component renames.
+      '[id="id.video.like.button"]',
+      '[aria-labelledby*="video.like.button"]',
+      "yt-segmented-like-dislike-button-view-model",
+      '[class*="segmented-like-dislike"]',
+      "yt-like-button-view-model",
+      '[class*="like-button-view-model"]',
+      // 2026-11-11 probe: some watch pages render the cluster as plain buttons
+      // inside this legacy id, with no view-model tags at all.
+      "#top-level-buttons-computed",
+      "ytd-segmented-like-dislike-button-renderer",
+      "ytd-like-button-renderer",
+      "#like-button"
+    ],
+    // Stage 9: the Like button itself. Browser probes showed the cluster tag and
+    // class probes can both miss on some watch layouts, while the accessibility
+    // id remains the stable contract from ytInitialData.
+    likeButton: [
+      '[id="id.video.like.button"]',
+      '[aria-labelledby*="video.like.button"]',
+      "yt-like-button-view-model",
+      '[class*="like-button-view-model"]',
+      "ytd-like-button-renderer",
+      "#like-button"
+    ],
+    // Stage 9: the watch actions row. Used only as a last resort, after the
+    // like button and the Like/Dislike cluster, because anchoring to the whole
+    // row can overlap the control immediately to its left.
+    watchActions: [
+      "#actions",
+      "yt-watch-metadata",
+      "ytd-watch-metadata"
     ]
   };
 
@@ -155,6 +225,51 @@ window.yga = window.yga || {};
     });
   }
 
+  // A node with no layout box: display:none, an ancestor with display:none, or
+  // detached from the document. Used to skip the hidden duplicates YouTube
+  // keeps in the DOM.
+  function isVisible(el) {
+    if (!el || typeof el.getBoundingClientRect !== "function") return false;
+    const box = el.getBoundingClientRect();
+    return !!box && (box.width > 0 || box.height > 0);
+  }
+
+  // YouTube renders almost everything inside open Shadow roots, so
+  // document.querySelector cannot reach the subscribe cluster or the
+  // like/dislike row. deepQuerySelectorAll walks every open shadow root and
+  // collects matches, so findDeep can locate those native anchors. We only read
+  // their bounding rect (to position the letter-button overlay); we never insert
+  // into YouTube's tree, which is what caused the whole-page re-render.
+  function deepQuerySelectorAll(selector, root) {
+    const out = [];
+    const seen = new Set();
+    const roots = [root || document];
+    while (roots.length) {
+      const scope = roots.shift();
+      let found;
+      try {
+        found = scope.querySelectorAll(selector);
+      } catch (e) {
+        found = [];
+      }
+      for (const el of found) {
+        if (!seen.has(el)) {
+          seen.add(el);
+          out.push(el);
+        }
+      }
+      // Descend into every element that hosts an open shadow root.
+      const hosts = scope.querySelectorAll ? scope.querySelectorAll("*") : [];
+      for (const host of hosts) {
+        if (host.shadowRoot && !seen.has(host.shadowRoot)) {
+          seen.add(host.shadowRoot);
+          roots.push(host.shadowRoot);
+        }
+      }
+    }
+    return out;
+  }
+
   yga.selectors = {
     find(name, root) {
       const chain = SELECTORS[name];
@@ -166,6 +281,65 @@ window.yga = window.yga || {};
       }
       this.reportMiss(name);
       return null;
+    },
+
+    // Same lookup, but a miss is expected (e.g. another extension's element that
+    // is only present when that extension is installed) — never journal it.
+    findOptional(name, root) {
+      const chain = SELECTORS[name];
+      if (!chain) return null;
+      const scope = root || document;
+      for (const sel of chain) {
+        const el = scope.querySelector(sel);
+        if (el) return el;
+      }
+      return null;
+    },
+
+    // First match that actually has a box. YouTube keeps several copies of the
+    // subscribe and like/dislike clusters in the DOM (hidden templates, the
+    // collapsed and the expanded header), and a hidden node reports a zero
+    // getBoundingClientRect — anchoring the letter-button overlay to one of
+    // those put the buttons off screen (§8.8 stage 9). Falls back to the first
+    // match when nothing has a box yet, so the caller can still retry.
+    findVisible(name, root) {
+      const chain = SELECTORS[name];
+      if (!chain) return null;
+      const scope = root || document;
+      let first = null;
+      for (const sel of chain) {
+        let found;
+        try {
+          found = scope.querySelectorAll(sel);
+        } catch (e) {
+          continue;
+        }
+        for (const el of found) {
+          if (!first) first = el;
+          if (isVisible(el)) return el;
+        }
+      }
+      return first;
+    },
+
+    // Shadow-DOM-piercing lookup: first match across the chain, searching every
+    // open shadow root. Used for the native subscribe / like-dislike anchors the
+    // letter-button overlay is positioned against. A miss is expected while the
+    // page is still rendering, so it never journals.
+    findDeep(name, root) {
+      const chain = SELECTORS[name];
+      if (!chain) return null;
+      for (const sel of chain) {
+        const list = deepQuerySelectorAll(sel, root);
+        if (list.length) return list[0];
+      }
+      return null;
+    },
+
+    // Raw shadow-piercing query by selector string (debug/probe + advanced
+    // callers). Returns every match across all open shadow roots.
+    queryDeep(selector, root) {
+      return deepQuerySelectorAll(selector, root);
     },
 
     reportMiss(name) {
