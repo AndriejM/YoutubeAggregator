@@ -229,10 +229,42 @@ window.yga = window.yga || {};
     await yga.profiles.setGroup(profileId, [channelId], groupId || null);
     await yga.state.refreshVisible();
     await paint(channelId);
+    await syncChecks(profileId, channelId);
+    await showNotSubscribed(channelId);
     if (yga.panel && yga.panel.isOpen()) {
       yga.panel.refresh("groups");
       yga.panel.refresh("channels");
     }
+  }
+
+  // YouTube sometimes reports a channel as subscribed on its page while it is
+  // missing from /feed/channels (user report 2026-11-11: resubscribing fixed
+  // it). The widget only shows catalog channels, so a group assignment on
+  // such a channel stays invisible — say so instead of failing silently.
+  async function showNotSubscribed(channelId) {
+    const box = currentMenu();
+    if (!box) return;
+    const note = box.querySelector(".yga-gp-warn");
+    const all = await yga.state.getAllSubs();
+    if (all.some((s) => s.channelId === channelId)) {
+      if (note) note.remove();
+      return;
+    }
+    if (!note) {
+      const warn = el("div", "yga-gp-warn");
+      warn.textContent = yga.i18n("groupNotSubscribed");
+      box.insertBefore(warn, box.firstChild);
+    }
+  }
+
+  // The menu's checkboxes are built once in openMenu; the single-group rule
+  // can move the tick to another row, so re-sync the open menu at once
+  // instead of waiting for close/reopen (user report 2026-11-11).
+  async function syncChecks(profileId, channelId) {
+    const box = currentMenu();
+    if (!box || !box._ygaChecks) return;
+    const current = await groupOf(profileId, channelId);
+    for (const row of box._ygaChecks) row.check.checked = !!current && row.gid === current;
   }
 
   // Theme a picker surface exactly like the widget: content/theme.js writes the
@@ -281,6 +313,7 @@ window.yga = window.yga || {};
 
     // One row per group: name left, checkbox right (§8.8 stage 9). Checking
     // assigns; unchecking removes the channel from that group.
+    const checkRows = [];
     for (const g of groups) {
       const row = el("label", "yga-gp-item");
       const name = el("span", "yga-gp-name");
@@ -296,7 +329,11 @@ window.yga = window.yga || {};
       row.appendChild(name);
       row.appendChild(check);
       box.appendChild(row);
+      checkRows.push({ check: check, gid: g.id });
     }
+    // assign() re-syncs these when the single-group tick moves to another row
+    // (user report 2026-11-11: the old tick only cleared after close/reopen).
+    box._ygaChecks = checkRows;
 
     // Quick create (§18.5): one field, Enter creates and assigns in one step.
     const quick = el("div", "yga-gp-quick");
@@ -1050,11 +1087,26 @@ window.yga = window.yga || {};
       const color = /^#[0-9a-f]{6}$/i.test(p.color || "") ? p.color : "#e05252";
       btn.style.setProperty("--yga-gp-color", color);
       btn.style.setProperty("--yga-gp-fg", contrastFg(color));
-      btn.addEventListener("click", (ev) => {
+      btn.addEventListener("click", async (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        if (currentMenu()) closeMenu();
-        else openMenu(btn, page.channelId, p.id);
+        if (currentMenu()) {
+          closeMenu();
+          return;
+        }
+        // Resolve the page channel at click time, never from the mount-time
+        // closure. On SPA navigation the buttons can be rebuilt — or kept by the
+        // mount early-return — while pageChannel() still reports the previous
+        // channel, so the menu checked the wrong group and unchecking removed a
+        // different channel (user report 2026-11-11). By the time the user
+        // clicks, the page has settled and the bridge returns the real channel.
+        const fresh = await pageChannel();
+        const channelId = (fresh && fresh.channelId) || page.channelId;
+        if (channelId && mounted && mounted.channelId !== channelId) {
+          mounted.channelId = channelId;
+          await paint(channelId);
+        }
+        openMenu(btn, channelId, p.id);
       });
       host.appendChild(btn);
       buttons.push({ btn: btn, profileId: p.id });

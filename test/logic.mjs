@@ -443,4 +443,229 @@ const chains = []; // async sections; the report waits for all of them
     .catch((e) => failures.push("content section crashed: " + e)));
 }
 
+// --- 4. page bridge: getPageChannel after SPA navigation -------------------
+// Regression (user report 2026-11-11): window.ytInitialData is only assigned
+// on full page loads, so reading it first made the letter buttons assign a
+// different channel after in-tab navigation. The live canonical link /
+// channel meta tag must win over the stale initial data.
+
+{
+  const bridgeSrc = read("page/bridge.js");
+
+  function loadBridge(page) {
+    const listeners = {};
+    const responses = [];
+    const nodes = {};
+    if (page.canonical) nodes['link[rel="canonical"]'] = { getAttribute: () => page.canonical };
+    if (page.metaChannel) nodes['meta[itemprop="channelId"]'] = { getAttribute: () => page.metaChannel };
+    const sandbox = {
+      console,
+      JSON,
+      Promise,
+      Object,
+      Array,
+      String,
+      Number,
+      RegExp,
+      Date,
+      setTimeout,
+      CustomEvent: function () {},
+      location: { origin: "https://www.youtube.com", href: page.href || "https://www.youtube.com/" },
+      document: { querySelector: (sel) => nodes[sel] || null }
+    };
+    sandbox.globalThis = sandbox;
+    sandbox.window = sandbox;
+    sandbox.addEventListener = (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); };
+    sandbox.postMessage = (msg) => { responses.push(msg); };
+    sandbox.dispatchEvent = () => {};
+    if (page.ytInitialData) sandbox.ytInitialData = page.ytInitialData;
+    if (page.ytInitialPlayerResponse) sandbox.ytInitialPlayerResponse = page.ytInitialPlayerResponse;
+    vm.createContext(sandbox);
+    vm.runInContext(bridgeSrc, sandbox, { filename: "bridge.js" });
+    // Inside the context `window` is the global proxy, not the sandbox object,
+    // so the bridge's `event.source !== window` guard only accepts events
+    // dispatched from the inner global.
+    const inner = vm.runInContext("globalThis", sandbox);
+    return async () => {
+      listeners.message[0]({ source: inner, data: { __yga: "cmd", id: 1, nonce: "n", cmd: "getPageChannel" } });
+      await flush(10);
+      const resp = responses[responses.length - 1];
+      return (resp && resp.ok && resp.data) || null;
+    };
+  }
+
+  const staleData = { metadata: { channelMetadataRenderer: { externalId: CH1, title: "Old Channel" } } };
+
+  chains.push((async () => {
+    const nav = await loadBridge({
+      canonical: "https://www.youtube.com/channel/" + CH2,
+      ytInitialData: staleData
+    })();
+    check(
+      "bridge: live canonical beats stale ytInitialData after SPA navigation",
+      !!nav && nav.channelId === CH2,
+      JSON.stringify(nav)
+    );
+    check(
+      "bridge: stale metadata title is not reused",
+      !!nav && nav.title === "",
+      JSON.stringify(nav && nav.title)
+    );
+
+    const fresh = await loadBridge({ ytInitialData: staleData })();
+    check(
+      "bridge: ytInitialData still serves full page loads",
+      !!fresh && fresh.channelId === CH1 && fresh.title === "Old Channel",
+      JSON.stringify(fresh)
+    );
+
+    const handle = await loadBridge({
+      canonical: "https://www.youtube.com/@handle",
+      metaChannel: CH2
+    })();
+    check(
+      "bridge: meta itemprop channelId on /@handle pages",
+      !!handle && handle.channelId === CH2,
+      JSON.stringify(handle)
+    );
+
+    const watch = await loadBridge({
+      canonical: "https://www.youtube.com/watch?v=aaa11111111",
+      ytInitialPlayerResponse: { videoDetails: { channelId: CH2, author: "Two" } }
+    })();
+    check(
+      "bridge: watch page resolves the video owner from the player response",
+      !!watch && watch.channelId === CH2 && watch.title === "Two",
+      JSON.stringify(watch)
+    );
+  })().catch((e) => failures.push("bridge section crashed: " + e)));
+}
+
+// --- 5. api-client: guide truncation must not hide browse channels ---------
+// Regression (user report 2026-11-11): the guide embeds only the first
+// subscriptions, so browse used to run only when the guide was empty and
+// subscribed channels beyond the guide cap never entered the catalog.
+
+{
+  chains.push((async () => {
+    const guideList = [{ channelId: CH1, title: "One", avatarUrl: "" }];
+    const browseList = [
+      { channelId: CH1, title: "One", avatarUrl: "" },
+      { channelId: CH2, title: "Two", avatarUrl: "" }
+    ];
+    let merged = null;
+    const sandbox = {
+      console, JSON, Promise, Map, Object, Array, String, Number, setTimeout,
+      yga: {
+        bridge: {
+          call: async (cmd) => {
+            if (cmd === "getGuideSubscriptions") return guideList;
+            if (cmd === "browseSubscriptions") return browseList;
+            throw new Error("unexpected cmd " + cmd);
+          }
+        },
+        state: {
+          loadCache: async () => [],
+          updateSubs: async (list) => { merged = list; },
+          getVisibleSubs: async () => []
+        }
+      }
+    };
+    sandbox.globalThis = sandbox;
+    sandbox.window = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(read("content/api-client.js"), sandbox, { filename: "api-client.js" });
+    await sandbox.yga.api.refreshSubscriptions();
+    check(
+      "api: browse merges in even when the guide is non-empty",
+      !!merged && merged.length === 2 && merged.some((s) => s.channelId === CH2),
+      JSON.stringify(merged)
+    );
+    check(
+      "api: guide entries are not duplicated by browse overlap",
+      !!merged && merged.filter((s) => s.channelId === CH1).length === 1,
+      JSON.stringify(merged)
+    );
+  })().catch((e) => failures.push("api-client section crashed: " + e)));
+}
+
+// --- 6. page bridge: browseSubscriptions follows continuations -------------
+// Regression (user report 2026-11-11): the first /feed/channels page embeds
+// only part of the subscriptions («Show more» hides the rest), so the catalog
+// missed channels assigned to groups.
+
+{
+  const sub = (id, title) => ({ channelRenderer: { channelId: id, title: { simpleText: title } } });
+  const cont = (token) => ({
+    continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: token } } }
+  });
+  const pageHtml = (items) =>
+    '<script>var ytInitialData = ' + JSON.stringify({ items: items }) + ';</script>';
+  const contJson = (items) => ({
+    onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: items } }]
+  });
+
+  chains.push((async () => {
+    const calls = [];
+    const listeners = {};
+    const responses = [];
+    const sandbox = {
+      console, JSON, Promise, Object, Array, String, Number, RegExp, Date, setTimeout,
+      CustomEvent: function () {},
+      location: { origin: "https://www.youtube.com", href: "https://www.youtube.com/" },
+      document: { querySelector: () => null },
+      ytcfg: { data_: { INNERTUBE_API_KEY: "k", INNERTUBE_CONTEXT: { client: { hl: "en" } } } },
+      fetch: (url, opts) => {
+        calls.push(url);
+        if (url === "/feed/channels") {
+          return Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(pageHtml([sub(CH1, "One"), cont("T1")]))
+          });
+        }
+        if (String(url).indexOf("/youtubei/v1/browse") === 0) {
+          const body = JSON.parse(opts.body);
+          if (body.continuation === "T1") {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(contJson([sub(CH2, "Two"), cont("T2")]))
+            });
+          }
+          if (body.continuation === "T2") {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(contJson([sub(CH1, "One")]))
+            });
+          }
+          return Promise.resolve({ ok: false, status: 500 });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+    };
+    sandbox.globalThis = sandbox;
+    sandbox.window = sandbox;
+    sandbox.addEventListener = (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); };
+    sandbox.postMessage = (msg) => { responses.push(msg); };
+    sandbox.dispatchEvent = () => {};
+    vm.createContext(sandbox);
+    vm.runInContext(read("page/bridge.js"), sandbox, { filename: "bridge.js" });
+    const inner = vm.runInContext("globalThis", sandbox);
+    listeners.message[0]({ source: inner, data: { __yga: "cmd", id: 1, nonce: "n", cmd: "browseSubscriptions" } });
+    await flush(40);
+    const resp = responses[responses.length - 1];
+    const list = (resp && resp.ok && resp.data) || [];
+    check(
+      "bridge: browse follows continuation tokens to the end",
+      !!resp && resp.ok && list.length === 2 &&
+      list.some((s) => s.channelId === CH1) && list.some((s) => s.channelId === CH2),
+      JSON.stringify(list)
+    );
+    check(
+      "bridge: continuation POSTs carry the token",
+      calls.length === 3 && calls[1].indexOf("/youtubei/v1/browse") === 0,
+      JSON.stringify(calls)
+    );
+  })().catch((e) => failures.push("browse continuation section crashed: " + e)));
+}
+
 Promise.all(chains).then(() => report());

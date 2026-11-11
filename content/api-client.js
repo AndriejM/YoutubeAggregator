@@ -36,7 +36,8 @@ window.yga = window.yga || {};
     // a service-worker fetch is 403 and a logged-out /feed/channels is empty.
     for (const cmd of ["browseSubscriptions", "getSubscriptionsPage"]) {
       try {
-        const list = normalize(await yga.bridge.call(cmd, 12000));
+        // Continuation pagination can span many POSTs — allow generous time.
+        const list = normalize(await yga.bridge.call(cmd, 90000));
         if (list.length) return list;
       } catch (e) {
         console.debug("[yga] " + cmd + " failed:", e);
@@ -48,27 +49,32 @@ window.yga = window.yga || {};
   yga.api = {
     // Refresh the cached catalog; returns the catalog list.
     async refreshSubscriptions() {
-      let list = [];
+      const byId = new Map();
       let guideCount = -1; // -1 = guide path failed
+      let browseCount = -1; // -1 = not attempted
       try {
-        list = await fromGuide();
-        guideCount = list.length;
+        const guide = await fromGuide();
+        guideCount = guide.length;
+        for (const s of guide) byId.set(s.channelId, s);
       } catch (e) {
         console.warn("[yga] guide unavailable:", e);
       }
-      let browseCount = -1; // -1 = not attempted
-      if (!list.length) {
-        try {
-          list = await fromBrowse();
-          browseCount = list.length;
-        } catch (e) {
-          console.warn("[yga] browse fallback failed:", e);
-        }
+      // The guide embeds only the first subscriptions — the rest hide behind
+      // «Show more» — so a guide hit is not proof of a complete catalog and
+      // the browse page always merges in (user report 2026-11-11: subscribed
+      // channels missing from the catalog, group assignments invisible).
+      try {
+        const browse = await fromBrowse();
+        browseCount = browse.length;
+        for (const s of browse) if (!byId.has(s.channelId)) byId.set(s.channelId, s);
+      } catch (e) {
+        console.warn("[yga] browse fallback failed:", e);
       }
+      const list = Array.from(byId.values());
       if (!list.length) {
         console.warn(`[yga] subscriptions empty: guide=${guideCount}, browse=${browseCount}`);
       } else {
-        console.info(`[yga] subscriptions: guide=${guideCount}, browse=${browseCount}`);
+        console.info(`[yga] subscriptions: guide=${guideCount}, browse=${browseCount}, merged=${list.length}`);
       }
       await yga.state.loadCache();
       if (!list.length) return yga.state.getVisibleSubs(); // keep cache on total failure

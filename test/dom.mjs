@@ -6,7 +6,7 @@
 // Run: node test/dom.mjs — exit code 0 = all checks pass.
 import vm from "node:vm";
 import {
-  read, CH1, check, report, failures, flush, makeSandbox, loadInto, feedWith
+  read, CH1, CH2, check, report, failures, flush, makeSandbox, loadInto, feedWith
 } from "./harness.mjs";
 
 // --- minimal DOM ---------------------------------------------------------
@@ -437,8 +437,11 @@ for (const f of [
 
 const yga = globalThis.yga;
 yga.i18n = (k) => k;
+// Mutable so a scenario can move the page to another channel without a clean
+// remount — the stale-closure state behind the 2026-11-11 group-picker bug.
+let pageChannelId = CH1;
 yga.bridge = {
-  call: async (cmd) => (cmd === "getPageChannel" ? { channelId: CH1, title: "One" } : null)
+  call: async (cmd) => (cmd === "getPageChannel" ? { channelId: pageChannelId, title: "One" } : null)
 };
 // bootstrap.js wires subs→render; the harness mirrors it so a profile switch
 // repaints rows the same way the widget does in the browser.
@@ -897,6 +900,90 @@ env.sandbox.chrome.storage.local
       (await yga.profiles.getComposition(p3.id))[CH1].groupId === null,
       JSON.stringify((await yga.profiles.getComposition(p3.id))[CH1])
     );
+
+    // Regression (user report 2026-11-11): the menu must target the CURRENT page
+    // channel, not the one captured when the buttons were mounted. Put CH1 in the
+    // Music group, then move the page to CH2 (not in any group) *without* a clean
+    // remount — the stale-closure state that made the checkbox show checked and
+    // unchecking remove a different channel.
+    docEvents.fire("pointerdown", { target: root });
+    await flush(10);
+    await yga.profiles.setGroup(p3.id, [CH1], music.id);
+    await flush(10);
+    pageChannelId = CH2;
+    gBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    const staleMenu = document.querySelector("[data-yga-group-menu]");
+    const staleCheck = staleMenu && staleMenu.querySelector(".yga-gp-check");
+    check(
+      "stage9: menu reflects the current page channel, not the mount-time one",
+      !!staleCheck && staleCheck.checked === false,
+      JSON.stringify(staleCheck && staleCheck.checked)
+    );
+    staleCheck.checked = true;
+    staleCheck.dispatchEvent({ type: "change" });
+    await flush(40);
+    const staleComp = await yga.profiles.getComposition(p3.id);
+    check(
+      "stage9: toggling the menu mutates the current channel, not the stale one",
+      !!staleComp[CH2] && staleComp[CH2].groupId === music.id &&
+        !!staleComp[CH1] && staleComp[CH1].groupId === music.id,
+      JSON.stringify({ ch2: staleComp[CH2], ch1: staleComp[CH1] })
+    );
+    pageChannelId = CH1;
+    // Restore p3 exactly: CH1 ungrouped, CH2 removed from the composition (the
+    // toggle added it) so the later §18.3 render-reuse check sees a clean tree.
+    const restore = await yga.profiles.getComposition(p3.id);
+    delete restore[CH2];
+    await yga.profiles.setGroup(p3.id, [CH1], null);
+    await yga.state.refreshVisible();
+    await flush(10);
+
+    // Regression (user report 2026-11-11): checking a group must land the
+    // channel in the widget's group tree AND re-sync the open menu's other
+    // checkboxes at once (they only refreshed after close/reopen).
+    docEvents.fire("pointerdown", { target: root });
+    await flush(10);
+    const second = await yga.groups.create("Second", p3.id);
+    await flush(10);
+    gBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    const menu3 = document.querySelector("[data-yga-group-menu]");
+    const gpName = (row) => {
+      const n = row.querySelector(".yga-gp-name");
+      return n ? n.textContent : "";
+    };
+    const items3 = menu3
+      ? Array.from(menu3.querySelectorAll(".yga-gp-item")).filter((r) => gpName(r))
+      : [];
+    const mc = items3.find((r) => gpName(r) === "Music");
+    const sc = items3.find((r) => gpName(r) === "Second");
+    check("stage9: menu lists both groups", !!mc && !!sc, JSON.stringify(items3.map(gpName)));
+    const mcCheck = mc && mc.querySelector(".yga-gp-check");
+    const scCheck = sc && sc.querySelector(".yga-gp-check");
+    mcCheck.checked = true;
+    mcCheck.dispatchEvent({ type: "change" });
+    await flush(40);
+    scCheck.checked = true;
+    scCheck.dispatchEvent({ type: "change" });
+    await flush(40);
+    check(
+      "stage9: checking a second group unchecks the first in the open menu",
+      mcCheck.checked === false && scCheck.checked === true,
+      JSON.stringify([mcCheck.checked, scCheck.checked])
+    );
+    const treeHost = document.querySelector('[data-yga="widget"] .yga-list');
+    const secondWrap = treeHost && treeHost.querySelector('[data-yga-group="' + second.id + '"]');
+    check(
+      "stage9: widget group tree shows the channel inside its group",
+      !!secondWrap && !!secondWrap.querySelector('[data-yga-row="' + CH1 + '"]'),
+      treeHost && Array.from(treeHost.children).map((n) => n.getAttribute("data-yga-group")).join(",")
+    );
+    scCheck.checked = false;
+    scCheck.dispatchEvent({ type: "change" });
+    await flush(40);
+    await yga.groups.remove(second.id);
+    await flush(10);
 
     // Watch page: the buttons mount left of Like/Dislike. Again the live tag is
     // the view-model component, not the legacy renderer.

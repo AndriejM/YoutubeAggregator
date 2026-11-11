@@ -120,6 +120,13 @@
   border-radius: 8px;
 }
 
+/* YT-override: YouTube's own `a.yt-simple-endpoint { display: inline-block }`
+   (0-1-1) out-specifies `.yga-row` (0-1-0), so rows with short titles shrank
+   to content width and two channels shared one line. Scoped, this is (0-2-0). */
+.yga-widget .yga-row {
+  display: flex;
+}
+
 .yga-row:hover {
   background: var(--yga-hover);
 }
@@ -519,6 +526,14 @@
   padding: 8px 10px;
   font-size: 12px;
   color: var(--yga-fg-dim, #606060);
+}
+
+.yga-gp-warn {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--yga-accent, #c00);
+  border-bottom: 1px solid var(--yga-border, rgba(0, 0, 0, 0.15));
 }
 
 .yga-gp-quick {

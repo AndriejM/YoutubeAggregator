@@ -215,6 +215,10 @@
     "message": "Create and assign",
     "description": "Button: create a group from the channel page and assign it"
   },
+  "groupNotSubscribed": {
+    "message": "This channel is missing from your YouTube subscriptions list — resubscribe, or it won't appear in the widget.",
+    "description": "Warning in the group menu when a channel shows as subscribed but is absent from the catalog"
+  },
   "channelsSearch": {
     "message": "Search channels",
     "description": "Placeholder of the channel list search field"

@@ -211,18 +211,46 @@
       return "";
     }
 
-    function parseEmbedded(jsonText, label, sink) {
-      if (!jsonText) return;
-      try {
-        sink(extractSubs(JSON.parse(jsonText)));
-      } catch (e) {
-        console.warn("[yga] failed to parse " + label + ":", e);
-      }
+    function continuationToken(root) {
+      let token = "";
+      walk(root, (obj) => {
+        if (token) return;
+        const cir = obj.continuationItemRenderer;
+        const t = cir && cir.continuationEndpoint &&
+          cir.continuationEndpoint.continuationCommand &&
+          cir.continuationEndpoint.continuationCommand.token;
+        if (typeof t === "string" && t) token = t;
+      }, 0);
+      return token;
     }
+
+    // «Show more» continuation: the same POST YouTube's own web client issues
+    // from the page world — cookies authenticate, so no SAPISIDHASH needed.
+    function browseContinuation(token) {
+      const cfg = window.ytcfg && ytcfg.data_;
+      const key = cfg && cfg.INNERTUBE_API_KEY || "";
+      const raw = cfg && cfg.INNERTUBE_CONTEXT;
+      const context = raw && raw.context ? raw.context : raw;
+      if (!key || !context) return Promise.resolve(null);
+      return fetch("/youtubei/v1/browse?key=" + encodeURIComponent(key), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ context: context, continuation: token })
+      }).then((res) => {
+        if (!res.ok) throw new Error("continuation HTTP " + res.status);
+        return res.json();
+      });
+    }
+
+    const CONTINUATION_MAX_PAGES = 60;
 
     // Full subscriptions page (PLAN.md §6 fallback2): plain HTML with
     // ytInitialData — works with the page session, unlike youtubei/browse,
-    // which requires the page-only SAPISIDHASH authorization header.
+    // which requires the page-only SAPISIDHASH authorization header. The
+    // first page embeds only part of the subscriptions («Show more» hides
+    // the rest), so continuation tokens are followed until exhausted
+    // (user report 2026-11-11: assigned channels invisible in groups).
     function fetchChannelsPage(path) {
       return fetch(path, { credentials: "same-origin" }).then((res) => {
         if (!res.ok) throw new Error(path + " HTTP " + res.status);
@@ -232,9 +260,50 @@
         const absorb = (subs) => subs.forEach((s) => {
           if (!merged.has(s.channelId)) merged.set(s.channelId, s);
         });
-        parseEmbedded(grabJson(html, 'ytInitialData = {'), "ytInitialData", absorb);
-        if (!merged.size) parseEmbedded(grabJson(html, 'ytInitialJSONLData = {'), "ytInitialJSONLData", absorb);
-        return Array.from(merged.values());
+        const parse = (jsonText, label) => {
+          if (!jsonText) return null;
+          try {
+            return JSON.parse(jsonText);
+          } catch (e) {
+            console.warn("[yga] failed to parse " + label + ":", e);
+            return null;
+          }
+        };
+        let token = "";
+        let root = parse(grabJson(html, 'ytInitialData = {'), "ytInitialData");
+        if (root) {
+          absorb(extractSubs(root));
+          token = continuationToken(root);
+        }
+        if (!merged.size) {
+          root = parse(grabJson(html, 'ytInitialJSONLData = {'), "ytInitialJSONLData");
+          if (root) {
+            absorb(extractSubs(root));
+            token = continuationToken(root);
+          }
+        }
+        const seen = new Set();
+        let pages = 0;
+        const step = () => {
+          if (!token || seen.has(token)) return null;
+          if (pages >= CONTINUATION_MAX_PAGES) {
+            console.warn("[yga] " + path + " continuation cap hit at " +
+              merged.size + " channels — catalog may be incomplete");
+            return null;
+          }
+          seen.add(token);
+          return browseContinuation(token).then((data) => {
+            if (!data) return null;
+            pages++;
+            absorb(extractSubs(data));
+            token = continuationToken(data);
+            return step();
+          }).catch((e) => {
+            console.warn("[yga] " + path + " continuation failed:", e);
+            return null;
+          });
+        };
+        return Promise.resolve(step()).then(() => Array.from(merged.values()));
       });
     }
 
@@ -306,25 +375,30 @@
 
     // Channel of the page being viewed (§8.8). Deliberately NOT ytcfg
     // EXTERNAL_CHANNEL_ID: that is the signed-in user, not the channel on
-    // screen. channelMetadataRenderer and a canonical /channel/UC… link are
-    // page-scoped, so they stay correct on someone else's channel.
+    // screen. Live DOM first: YouTube rewrites the canonical link and the
+    // channel meta tag on every SPA navigation, while window.ytInitialData is
+    // only assigned on full page loads — reading it first made the letter
+    // buttons assign a different channel after in-tab navigation
+    // (user report 2026-11-11).
     function cmdGetPageChannel() {
-      const data = window.ytInitialData;
-      const meta = data && data.metadata && data.metadata.channelMetadataRenderer;
-      const externalId = meta && meta.externalId;
-      let channelId = typeof externalId === "string" && externalId.indexOf("UC") === 0 ? externalId : "";
-      let title = meta ? txt(meta.title) : "";
-      if (!channelId) {
-        const link = document.querySelector('link[rel="canonical"]');
-        const href = (link && link.getAttribute("href")) || "";
-        const m = href.match(/\/channel\/(UC[0-9A-Za-z_-]{10,})/);
-        if (m) channelId = m[1];
-      }
+      let channelId = "";
+      const link = document.querySelector('link[rel="canonical"]');
+      const href = (link && link.getAttribute("href")) || "";
+      const m = href.match(/\/channel\/(UC[0-9A-Za-z_-]{10,})/);
+      if (m) channelId = m[1];
       if (!channelId) {
         const tag = document.querySelector('meta[itemprop="channelId"]');
         const content = (tag && tag.getAttribute("content")) || "";
         if (content.indexOf("UC") === 0) channelId = content;
       }
+      const data = window.ytInitialData;
+      const meta = data && data.metadata && data.metadata.channelMetadataRenderer;
+      const externalId = meta && meta.externalId;
+      const metaId = typeof externalId === "string" && externalId.indexOf("UC") === 0 ? externalId : "";
+      if (!channelId) channelId = metaId;
+      // Only trust the metadata title when it describes THIS channel: after an
+      // SPA navigation ytInitialData still holds the previous page's renderer.
+      let title = meta && metaId && metaId === channelId ? txt(meta.title) : "";
       // Watch pages have no channelMetadataRenderer: the channel that owns the
       // video lives in ytInitialPlayerResponse (videoDetails.channelId, with
       // the microformat owner as a fallback). Without this the letter buttons
