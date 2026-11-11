@@ -378,7 +378,7 @@ window.yga = window.yga || {};
       lastRows = list.slice(0, ROW_LIMIT);
       const frag = document.createDocumentFragment();
       for (const sub of lastRows) {
-        frag.appendChild(channelRow(sub, comp[sub.channelId], observer, st, groups));
+        frag.appendChild(channelRow(sub, comp[sub.channelId], observer, st, groups, updateBulk));
       }
       rows.textContent = "";
       if (!lastRows.length) {
@@ -514,7 +514,7 @@ window.yga = window.yga || {};
     await fill();
   };
 
-  function channelRow(sub, rec, observer, st, groups) {
+  function channelRow(sub, rec, observer, st, groups, updateBulk) {
     const member = isMember(rec);
     const row = el("div", "yga-panel-row yga-panel-channel");
 
@@ -524,6 +524,7 @@ window.yga = window.yga || {};
       if (box.checked) st.selected.add(sub.channelId);
       else st.selected.delete(sub.channelId);
       row.classList.toggle("yga-panel-selected", box.checked);
+      updateBulk();
     });
 
     const avatar = el("img", "yga-panel-avatar", { alt: "" });
