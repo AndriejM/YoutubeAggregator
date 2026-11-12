@@ -223,6 +223,58 @@
     "message": "Down",
     "description": "Button: move a group down in the widget order"
   },
+  "groupAvatar": {
+    "message": "Group avatar",
+    "description": "Button and aria-label: choose the avatar of a group"
+  },
+  "groupAvatarTitle": {
+    "message": "Choose group avatar",
+    "description": "Title of the group avatar picker dialog"
+  },
+  "groupAvatarNone": {
+    "message": "None",
+    "description": "Tab in the group avatar picker: no avatar"
+  },
+  "groupAvatarNoneHint": {
+    "message": "No avatar is selected. Choose a bundled icon or an HTTPS URL.",
+    "description": "Hint shown on the None tab of the group avatar picker"
+  },
+  "groupAvatarEmpty": {
+    "message": "No icons are available for this theme.",
+    "description": "Placeholder when a group avatar theme has no icons"
+  },
+  "groupAvatarUrl": {
+    "message": "URL",
+    "description": "Tab in the group avatar picker: use an external image URL"
+  },
+  "groupAvatarUrlHint": {
+    "message": "Use a direct HTTPS image URL. YouTube may block some external images.",
+    "description": "Hint under the external image URL field"
+  },
+  "groupAvatarInvalidUrl": {
+    "message": "Enter a direct HTTPS image URL.",
+    "description": "Validation error for an invalid group avatar URL"
+  },
+  "groupAvatarApply": {
+    "message": "Apply URL",
+    "description": "Button: apply the external group avatar URL"
+  },
+  "groupAvatarRemove": {
+    "message": "Remove",
+    "description": "Button: remove the group avatar"
+  },
+  "groupAvatarColor": {
+    "message": "Color",
+    "description": "Label: tint color for built-in group avatars"
+  },
+  "groupAvatarColorApply": {
+    "message": "Set",
+    "description": "Button: apply the selected tint color to the current group avatar"
+  },
+  "groupAvatarColorReset": {
+    "message": "Original",
+    "description": "Button: reset the group avatar tint to the original icon colors"
+  },
   "groupsEmpty": {
     "message": "No groups yet. Create one to split the widget into a tree.",
     "description": "Placeholder of the groups section when the profile has none"

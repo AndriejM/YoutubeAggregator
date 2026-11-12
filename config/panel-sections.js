@@ -225,6 +225,35 @@ window.yga = window.yga || {};
       const g = groups[i];
       const row = el("div", "yga-panel-row");
 
+      const avatarBtn = el("button", "yga-panel-avatar-btn", {
+        type: "button",
+        "aria-label": yga.i18n("groupAvatar"),
+        title: yga.i18n("groupAvatar")
+      });
+      const avatarNode = yga.groupIcons ? yga.groupIcons.avatarNode(g.avatar, "yga-panel-avatar", { alt: "" }) : null;
+      if (avatarNode) {
+        avatarBtn.appendChild(avatarNode);
+      } else {
+        const empty = el("span", "yga-panel-avatar-empty");
+        empty.textContent = (g.name || "?").slice(0, 1).toUpperCase();
+        avatarBtn.appendChild(empty);
+      }
+      avatarBtn.addEventListener("click", () => {
+        yga.iconPicker.open({
+          current: g.avatar,
+          onPick: async (avatar) => {
+            await yga.groups.setAvatar(g.id, avatar);
+            await yga.state.refreshVisible();
+            yga.panel.refresh("groups");
+          },
+          onApply: async (avatar) => {
+            await yga.groups.setAvatar(g.id, avatar);
+            await yga.state.refreshVisible();
+            yga.panel.refresh("groups");
+          }
+        });
+      });
+
       const name = el("span", "yga-panel-title");
       name.textContent = g.name;
       name.title = g.name;
@@ -275,6 +304,7 @@ window.yga = window.yga || {};
         yga.panel.refresh("channels");
       });
 
+      row.appendChild(avatarBtn);
       row.appendChild(name);
       row.appendChild(count);
       row.appendChild(up);

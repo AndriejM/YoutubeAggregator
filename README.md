@@ -18,6 +18,9 @@ research is kept under `examples/` and is not part of the shipped extension.
   profile mirrors your YouTube subscriptions. Switching a profile is instant (storage only).
 - **Channel groups** — a tree in the widget: group rows with summed counters, collapsible;
   a channel belongs to exactly one group per profile.
+- **Group avatars** — built-in icon themes or direct HTTPS image URLs; icons can be found on
+  [icons8.com](https://icons8.com/) and installed as URLs like
+  `https://img.icons8.com/?size=48&id=HqsZDKt3q3UW&format=png&color=000000`.
 - **New-video counters** — per channel, from the public RSS feed
   (`/feeds/videos.xml`), batched and throttled, cached with ETags. A click on a channel
   opens its Videos tab and resets its counter; right-click resets a channel, a group or

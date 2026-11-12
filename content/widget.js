@@ -646,6 +646,45 @@ window.yga = window.yga || {};
     await yga.groups.setCollapsed(g.id, !g.collapsed); // emits → the tree redraws
   }
 
+  function groupAvatarSrc(g) {
+    return yga.groupIcons ? yga.groupIcons.src(g && g.avatar) : "";
+  }
+
+  function paintGroupAvatar(btn, g) {
+    if (!btn) return;
+    let avatar = btn.querySelector(".yga-group-avatar");
+    const src = groupAvatarSrc(g);
+    if (!src) {
+      if (avatar) avatar.remove();
+      btn.classList.remove("yga-has-avatar");
+      return;
+    }
+    const wantTint = yga.groupIcons ? yga.groupIcons.tinted(g && g.avatar) : false;
+    if (avatar && (avatar.tagName === "IMG") === wantTint) {
+      avatar.remove();
+      avatar = null;
+    }
+    if (!avatar) {
+      avatar = yga.groupIcons.avatarNode(g.avatar, "yga-group-avatar", { alt: "", loading: "lazy" });
+      avatar.addEventListener("error", () => {
+        avatar.classList.add("yga-avatar-error");
+      });
+      const name = btn.querySelector(".yga-group-name");
+      btn.insertBefore(avatar, name || null);
+    }
+    btn.classList.add("yga-has-avatar");
+    avatar.classList.remove("yga-avatar-error");
+    if (avatar.tagName === "IMG") {
+      if (avatar.getAttribute("src") !== src) avatar.setAttribute("src", src);
+    } else {
+      const mask = "url(" + src + ")";
+      avatar.style.setProperty("-webkit-mask-image", mask);
+      avatar.style.setProperty("mask-image", mask);
+      avatar.style.setProperty("background-color", g.avatar.color);
+    }
+    avatar.setAttribute("title", g.name);
+  }
+
   function groupNode(g, members, catalogOrder) {
     const key = g.id || UNGROUPED;
     const collapsed = g.pseudo ? ungroupedCollapsed : !!g.collapsed;
@@ -669,6 +708,7 @@ window.yga = window.yga || {};
     btn.appendChild(caret);
     btn.appendChild(name);
     btn.appendChild(chip);
+    paintGroupAvatar(btn, g);
     btn.addEventListener("click", () => toggleGroup(g));
     btn.addEventListener("contextmenu", (ev) => {
       if (ev.ctrlKey) return;
@@ -705,6 +745,7 @@ window.yga = window.yga || {};
     // state and the same members is reused as-is instead of being rebuilt.
     wrap._ygaCollapsed = collapsed;
     wrap._ygaSig = memberSig(members);
+    wrap._ygaAvatar = yga.groupIcons ? yga.groupIcons.sig(g.avatar) : "";
     return wrap;
   }
 
@@ -727,6 +768,7 @@ window.yga = window.yga || {};
       const collapsed = item.g.pseudo ? ungroupedCollapsed : !!item.g.collapsed;
       const sig = memberSig(item.members);
       const existing = live.get(key);
+      const avatarSig = yga.groupIcons ? yga.groupIcons.sig(item.g.avatar) : "";
       // Unchanged group: keep the node, so its rows, avatars and the scroll
       // position survive. Only the label can need a repaint (rename).
       if (existing && existing._ygaCollapsed === collapsed && existing._ygaSig === sig) {
@@ -739,6 +781,10 @@ window.yga = window.yga || {};
         }
         const btn = existing.querySelector(".yga-group");
         if (btn) btn.title = item.g.name;
+        if (existing._ygaAvatar !== avatarSig) {
+          paintGroupAvatar(btn, item.g);
+          existing._ygaAvatar = avatarSig;
+        }
         groupChips.set(item.g.id || UNGROUPED, {
           chip: existing.querySelector(".yga-group-count"),
           members: item.members

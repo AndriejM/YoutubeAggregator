@@ -52,6 +52,13 @@ window.yga = window.yga || {};
     return max + 1;
   }
 
+  function normalizeAvatar(avatar) {
+    if (yga.groupIcons && typeof yga.groupIcons.normalize === "function") {
+      return yga.groupIcons.normalize(avatar);
+    }
+    return null;
+  }
+
   // Cross-tab convergence: another tab's panel edited yga:groups.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes[GROUPS_KEY]) return;
@@ -130,6 +137,20 @@ window.yga = window.yga || {};
       const g = this.get(id);
       if (!g || !!g.collapsed === !!collapsed) return false;
       g.collapsed = !!collapsed;
+      g.updatedAt = now();
+      await persist();
+      return true;
+    },
+
+    async setAvatar(id, avatar) {
+      await this.load();
+      const g = this.get(id);
+      if (!g) return false;
+      const next = normalizeAvatar(avatar);
+      const current = normalizeAvatar(g.avatar);
+      if (JSON.stringify(next || null) === JSON.stringify(current || null)) return false;
+      if (next) g.avatar = next;
+      else delete g.avatar;
       g.updatedAt = now();
       await persist();
       return true;

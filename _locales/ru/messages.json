@@ -223,6 +223,58 @@
     "message": "Ниже",
     "description": "Кнопка: опустить группу в порядке виджета"
   },
+  "groupAvatar": {
+    "message": "Аватар группы",
+    "description": "Кнопка и aria-метка: выбрать аватар группы"
+  },
+  "groupAvatarTitle": {
+    "message": "Выбор аватара группы",
+    "description": "Заголовок диалога выбора аватара группы"
+  },
+  "groupAvatarNone": {
+    "message": "Без аватара",
+    "description": "Вкладка в диалоге выбора аватара группы: без аватара"
+  },
+  "groupAvatarNoneHint": {
+    "message": "Аватар не выбран. Выберите встроенную иконку или HTTPS-ссылку.",
+    "description": "Подсказка на вкладке «Без аватара» в диалоге выбора аватара группы"
+  },
+  "groupAvatarEmpty": {
+    "message": "Для этой темы нет доступных иконок.",
+    "description": "Заглушка, когда в теме аватаров группы нет иконок"
+  },
+  "groupAvatarUrl": {
+    "message": "URL",
+    "description": "Вкладка в диалоге выбора аватара группы: внешний URL изображения"
+  },
+  "groupAvatarUrlHint": {
+    "message": "Используйте прямую HTTPS-ссылку на изображение. YouTube может блокировать часть внешних картинок.",
+    "description": "Подсказка под полем внешнего URL изображения"
+  },
+  "groupAvatarInvalidUrl": {
+    "message": "Введите прямую HTTPS-ссылку на изображение.",
+    "description": "Ошибка валидации для неверного URL аватара группы"
+  },
+  "groupAvatarApply": {
+    "message": "Применить URL",
+    "description": "Кнопка: применить внешний URL аватара группы"
+  },
+  "groupAvatarRemove": {
+    "message": "Убрать",
+    "description": "Кнопка: убрать аватар группы"
+  },
+  "groupAvatarColor": {
+    "message": "Цвет",
+    "description": "Метка: цвет тонировки встроенных аватаров групп"
+  },
+  "groupAvatarColorApply": {
+    "message": "Установить",
+    "description": "Кнопка: применить выбранный цвет тонировки к текущему аватару группы"
+  },
+  "groupAvatarColorReset": {
+    "message": "Оригинал",
+    "description": "Кнопка: вернуть аватару группы исходные цвета иконки"
+  },
   "groupsEmpty": {
     "message": "Групп пока нет. Создайте первую — виджет станет деревом.",
     "description": "Заглушка раздела групп, когда в профиле их нет"

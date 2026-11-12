@@ -424,12 +424,14 @@ for (const f of [
   "content/selectors.js",
   "content/state.js",
   "content/profiles.js",
+  "content/group-icons.js",
   "content/groups.js",
   "content/counters.js",
   "content/theme.js",
   "content/widget.js",
   "content/group-picker.js",
   "config/panel.js",
+  "config/icon-picker.js",
   "config/panel-sections.js"
 ]) {
   vm.runInThisContext(read(f), { filename: f });
@@ -1792,6 +1794,260 @@ globalThis.innerWidth = 1280;
         total: resetTotal && resetTotal.textContent
       })
     );
+
+    // --- stage 11: group avatars -------------------------------------------
+    check("stage11: icon catalog exposes themes", yga.groupIcons.themes.length === 38,
+      String(yga.groupIcons.themes.length));
+    check("stage11: PNG theme path", yga.groupIcons.path("nature", 1) === "icons/groups/nature/1.png",
+      yga.groupIcons.path("nature", 1));
+    check("stage11: JPG theme path", yga.groupIcons.path("wedding", 1) === "icons/groups/wedding/1.jpg",
+      yga.groupIcons.path("wedding", 1));
+
+    const pAvatar = await yga.profiles.create("Avatars");
+    await yga.profiles.addChannel(pAvatar.id, CH1);
+    await yga.profiles.setActiveProfile(pAvatar.id);
+    await yga.state.refreshVisible();
+    const avatarGroup = await yga.groups.create("Avatar group", pAvatar.id);
+    await yga.profiles.setGroup(pAvatar.id, [CH1], avatarGroup.id);
+    await yga.state.refreshVisible();
+    await flush(20);
+
+    const avatarStored = async () => {
+      const all = await chrome.storage.local.get("yga:groups");
+      return (all["yga:groups"] || []).find((g) => g.id === avatarGroup.id);
+    };
+
+    check("stage11: setAvatar persists builtin avatar",
+      await yga.groups.setAvatar(avatarGroup.id, { type: "builtin", theme: "nature", index: 2 }));
+    let storedAvatar = await avatarStored();
+    check("stage11: stored builtin avatar", !!storedAvatar && !!storedAvatar.avatar &&
+      storedAvatar.avatar.type === "builtin" && storedAvatar.avatar.theme === "nature" &&
+      storedAvatar.avatar.index === 2, JSON.stringify(storedAvatar && storedAvatar.avatar));
+
+    const avatarWidget = document.querySelector('[data-yga="widget"]');
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    const widgetAvatar = avatarWidget && avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget renders group avatar", !!widgetAvatar &&
+      widgetAvatar.getAttribute("src") === yga.groupIcons.url("nature", 2),
+      widgetAvatar && widgetAvatar.getAttribute("src"));
+
+    yga.panel.open("groups");
+    await flush(40);
+    let avatarSection = content.querySelector('[data-section="groups"]');
+    let avatarBtn = avatarSection && avatarSection.querySelector(".yga-panel-avatar-btn");
+    check("stage11: panel groups row has avatar button", !!avatarBtn);
+    avatarBtn.dispatchEvent({ type: "click" });
+    await flush(10);
+    let avatarPicker = document.querySelector(".yga-icon-modal");
+    check("stage11: avatar picker opens", !!avatarPicker);
+    check("stage11: picker has none, themes and URL tabs", !!avatarPicker &&
+      avatarPicker.querySelectorAll(".yga-icon-tab").length === 40,
+      avatarPicker && String(avatarPicker.querySelectorAll(".yga-icon-tab").length));
+    const firstCell = avatarPicker && avatarPicker.querySelector(".yga-icon-cell");
+    check("stage11: picker renders icon grid", !!firstCell &&
+      !!firstCell.querySelector(".yga-icon-img"));
+    firstCell.dispatchEvent({ type: "click" });
+    await flush(40);
+    check("stage11: picker closes after choosing an icon", !document.querySelector(".yga-icon-modal"));
+    storedAvatar = await avatarStored();
+    check("stage11: picker updates stored avatar", !!storedAvatar && !!storedAvatar.avatar &&
+      storedAvatar.avatar.type === "builtin" && storedAvatar.avatar.theme === "nature" &&
+      storedAvatar.avatar.index === 1, JSON.stringify(storedAvatar && storedAvatar.avatar));
+
+    avatarSection = content.querySelector('[data-section="groups"]');
+    avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+    await flush(10);
+    avatarPicker = document.querySelector(".yga-icon-modal");
+    const urlTab = avatarPicker && Array.from(avatarPicker.querySelectorAll(".yga-icon-tab")).find((b) => b.textContent === "groupAvatarUrl");
+    check("stage11: picker has URL tab", !!urlTab);
+    urlTab.dispatchEvent({ type: "click" });
+    await flush(10);
+    const urlInput = avatarPicker.querySelector(".yga-icon-url .yga-panel-input");
+    const urlApply = avatarPicker.querySelector(".yga-icon-url .yga-panel-primary");
+    check("stage11: URL tab renders input and apply", !!urlInput && !!urlApply);
+    urlInput.value = "http://example.com/bad.png";
+    urlApply.dispatchEvent({ type: "click" });
+    await flush(10);
+    storedAvatar = await avatarStored();
+    check("stage11: invalid URL is rejected", !!avatarPicker.isConnected && !!storedAvatar.avatar &&
+      storedAvatar.avatar.type === "builtin", JSON.stringify(storedAvatar && storedAvatar.avatar));
+    urlInput.value = "https://example.com/avatar.png";
+    urlApply.dispatchEvent({ type: "click" });
+    await flush(40);
+    check("stage11: picker closes after applying URL", !document.querySelector(".yga-icon-modal"));
+    storedAvatar = await avatarStored();
+    check("stage11: URL avatar persists", !!storedAvatar && !!storedAvatar.avatar &&
+      storedAvatar.avatar.type === "url" && storedAvatar.avatar.url === "https://example.com/avatar.png",
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    const urlWidgetAvatar = avatarWidget && avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget renders URL avatar", !!urlWidgetAvatar &&
+      urlWidgetAvatar.getAttribute("src") === "https://example.com/avatar.png",
+      urlWidgetAvatar && urlWidgetAvatar.getAttribute("src"));
+
+    avatarSection = content.querySelector('[data-section="groups"]');
+    avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+    await flush(10);
+    avatarPicker = document.querySelector(".yga-icon-modal");
+    const removeBtn = avatarPicker && Array.from(avatarPicker.querySelectorAll(".yga-panel-bar button")).find((b) => b.textContent === "groupAvatarRemove");
+    check("stage11: picker has remove button", !!removeBtn);
+    removeBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: remove clears stored avatar", !!storedAvatar && !storedAvatar.avatar,
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    check("stage11: widget removes avatar after clear",
+      !avatarWidget.querySelector(".yga-group-avatar"));
+
+    // --- stage 11: avatar tint (CSS mask recolor, files untouched) ----------
+    check("stage11: normalize keeps builtin color",
+      yga.groupIcons.normalize({ type: "builtin", theme: "nature", index: 1, color: "#FF0000" }).color === "#ff0000");
+    check("stage11: normalize drops invalid color",
+      !yga.groupIcons.normalize({ type: "builtin", theme: "nature", index: 1, color: "red" }).color);
+    check("stage11: normalize drops color on URL avatars",
+      !yga.groupIcons.normalize({ type: "url", url: "https://example.com/a.png", color: "#ff0000" }).color);
+
+    await yga.groups.setAvatar(avatarGroup.id, { type: "builtin", theme: "nature", index: 3, color: "#ff0000" });
+    await flush(20);
+    storedAvatar = await avatarStored();
+    check("stage11: tinted avatar persists", !!storedAvatar && !!storedAvatar.avatar &&
+      storedAvatar.avatar.color === "#ff0000", JSON.stringify(storedAvatar && storedAvatar.avatar));
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    let tintedAvatar = avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget renders tinted avatar as masked span", !!tintedAvatar &&
+      tintedAvatar.tagName === "SPAN" && tintedAvatar.classList.contains("yga-avatar-tinted") &&
+      tintedAvatar.styleVars["mask-image"] === "url(" + yga.groupIcons.url("nature", 3) + ")" &&
+      tintedAvatar.styleVars["background-color"] === "#ff0000",
+      tintedAvatar && tintedAvatar.tagName + " " + JSON.stringify(tintedAvatar.styleVars));
+
+    yga.panel.open("groups");
+    await flush(40);
+    avatarSection = content.querySelector('[data-section="groups"]');
+    avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+    await flush(10);
+    avatarPicker = document.querySelector(".yga-icon-modal");
+    const colorInput = avatarPicker && avatarPicker.querySelector(".yga-icon-color-input");
+    check("stage11: picker shows color input with current tint", !!colorInput &&
+      colorInput.getAttribute("type") === "color" && colorInput.value === "#ff0000",
+      colorInput && colorInput.value);
+    colorInput.value = "#00ff00";
+    colorInput.dispatchEvent({ type: "input" });
+    await flush(10);
+    const firstTintCell = avatarPicker.querySelector(".yga-icon-cell");
+    firstTintCell.dispatchEvent({ type: "click" });
+    await flush(40);
+    check("stage11: picker closes after tinted pick", !document.querySelector(".yga-icon-modal"));
+    storedAvatar = await avatarStored();
+    check("stage11: picker keeps chosen tint", !!storedAvatar && !!storedAvatar.avatar &&
+      storedAvatar.avatar.theme === "nature" && storedAvatar.avatar.index === 1 &&
+      storedAvatar.avatar.color === "#00ff00", JSON.stringify(storedAvatar && storedAvatar.avatar));
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    tintedAvatar = avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget repaints tint", !!tintedAvatar &&
+      tintedAvatar.classList.contains("yga-avatar-tinted") &&
+      tintedAvatar.styleVars["background-color"] === "#00ff00",
+      tintedAvatar && JSON.stringify(tintedAvatar.styleVars));
+
+    await yga.groups.setAvatar(avatarGroup.id, { type: "builtin", theme: "nature", index: 2 });
+    await flush(20);
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    const plainAvatar = avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget replaces tinted avatar with plain img", !!plainAvatar &&
+      plainAvatar.tagName === "IMG" && plainAvatar.getAttribute("src") === yga.groupIcons.url("nature", 2),
+      plainAvatar && plainAvatar.tagName + " " + plainAvatar.getAttribute("src"));
+
+    await yga.groups.setAvatar(avatarGroup.id, { type: "builtin", theme: "nature", index: 3, color: "#0000ff" });
+    await flush(20);
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    const retintedAvatar = avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: widget replaces plain img with tinted span", !!retintedAvatar &&
+      retintedAvatar.tagName === "SPAN" && retintedAvatar.classList.contains("yga-avatar-tinted") &&
+      retintedAvatar.styleVars["background-color"] === "#0000ff",
+      retintedAvatar && retintedAvatar.tagName + " " + JSON.stringify(retintedAvatar.styleVars));
+
+    await yga.groups.setAvatar(avatarGroup.id, null);
+    await flush(40);
+    yga.panel.open("groups");
+    await flush(40);
+    avatarSection = content.querySelector('[data-section="groups"]');
+    avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+    await flush(10);
+    avatarPicker = document.querySelector(".yga-icon-modal");
+    const freshColorInput = avatarPicker && avatarPicker.querySelector(".yga-icon-color-input");
+    const freshApplyBtn = avatarPicker && avatarPicker.querySelector(".yga-icon-color-apply");
+    check("stage11: picker shows color input without current avatar", !!freshColorInput &&
+      freshColorInput.value === "#ffffff", freshColorInput && freshColorInput.value);
+    check("stage11: Set button is disabled without current icon", !!freshApplyBtn &&
+      freshApplyBtn.disabled, freshApplyBtn && freshApplyBtn.disabled);
+    freshColorInput.value = "#123456";
+    freshColorInput.dispatchEvent({ type: "input" });
+    await flush(10);
+    avatarPicker.querySelector(".yga-icon-cell").dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: picker applies color chosen before first icon", !!storedAvatar &&
+      !!storedAvatar.avatar && storedAvatar.avatar.color === "#123456",
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+    yga.widget.render(await yga.state.getVisibleSubs());
+    await flush(20);
+    const freshTintedAvatar = avatarWidget.querySelector(".yga-group-avatar");
+    check("stage11: fresh picker tint renders in widget", !!freshTintedAvatar &&
+      freshTintedAvatar.tagName === "SPAN" &&
+      freshTintedAvatar.styleVars["background-color"] === "#123456",
+      freshTintedAvatar && freshTintedAvatar.tagName + " " + JSON.stringify(freshTintedAvatar.styleVars));
+    avatarSection = content.querySelector('[data-section="groups"]');
+    const panelTintedAvatar = avatarSection && avatarSection.querySelector(".yga-panel-avatar");
+    check("stage11: panel avatar button renders tinted span", !!panelTintedAvatar &&
+      panelTintedAvatar.tagName === "SPAN" && panelTintedAvatar.classList.contains("yga-avatar-tinted"),
+      panelTintedAvatar && panelTintedAvatar.tagName);
+
+    avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+    await flush(10);
+    avatarPicker = document.querySelector(".yga-icon-modal");
+    const applyColorInput = avatarPicker && avatarPicker.querySelector(".yga-icon-color-input");
+    const applyColorBtn = avatarPicker && avatarPicker.querySelector(".yga-icon-color-apply");
+    check("stage11: Set button is enabled for current icon", !!applyColorInput &&
+      !!applyColorBtn && !applyColorBtn.disabled, applyColorBtn && applyColorBtn.disabled);
+    applyColorInput.value = "#654321";
+    applyColorInput.dispatchEvent({ type: "input" });
+    await flush(10);
+    const previewBeforeApply = avatarPicker.querySelector(".yga-icon-preview .yga-avatar-tinted");
+    check("stage11: color input previews pending tint", !!previewBeforeApply &&
+      previewBeforeApply.styleVars["background-color"] === "#654321",
+      previewBeforeApply && JSON.stringify(previewBeforeApply.styleVars));
+    applyColorBtn.dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: Set button applies color to current icon", !!storedAvatar &&
+      !!storedAvatar.avatar && storedAvatar.avatar.color === "#654321",
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+    check("stage11: Set button keeps picker open", !!document.querySelector(".yga-icon-modal"));
+    yga.iconPicker.close();
+    await flush(10);
+
+    let directApplied = null;
+    const directPicker = yga.iconPicker.open({
+      current: { type: "builtin", theme: "nature", index: 4 },
+      onApply: (avatar) => { directApplied = JSON.parse(JSON.stringify(avatar)); }
+    });
+    const directColorInput = directPicker && directPicker.querySelector(".yga-icon-color-input");
+    const directApplyBtn = directPicker && directPicker.querySelector(".yga-icon-color-apply");
+    check("stage11: Set button is enabled for current icon without saved color", !!directColorInput &&
+      !!directApplyBtn && !directApplyBtn.disabled, directApplyBtn && directApplyBtn.disabled);
+    directApplyBtn.dispatchEvent({ type: "click" });
+    await flush(10);
+    check("stage11: Set applies displayed color without input event", !!directApplied &&
+      directApplied.color === "#ffffff", JSON.stringify(directApplied));
+    yga.iconPicker.close();
+    await flush(10);
 
     report();
   })

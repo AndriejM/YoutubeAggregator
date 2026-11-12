@@ -370,6 +370,27 @@
   transform: rotate(-90deg);
 }
 
+.yga-group-avatar {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.yga-group-avatar.yga-avatar-error {
+  display: none;
+}
+
+.yga-group-avatar.yga-avatar-tinted {
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
 .yga-group-name {
   flex: 1 1 auto;
   min-width: 0;
