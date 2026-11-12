@@ -10,12 +10,13 @@ window.yga = window.yga || {};
   const u = yga.panel.util;
   const el = u.el;
 
-  const ORDER = ["profiles", "groups", "channels", "counters", "widget", "theme", "data"];
+  const ORDER = ["profiles", "groups", "channels", "counters", "filters", "widget", "theme", "data"];
   const TITLES = {
     profiles: "sectionProfiles",
     groups: "sectionGroups",
     channels: "sectionChannels",
     counters: "sectionCounters",
+    filters: "sectionFilters",
     widget: "sectionWidget",
     theme: "sectionTheme",
     data: "sectionData"
@@ -675,6 +676,43 @@ window.yga = window.yga || {};
       await u.save("refresh.minIntervalMs", seconds * 1000);
     });
     host.appendChild(u.field("refreshMinInterval", minInterval, "refreshMinIntervalHint"));
+  };
+
+  // ---- Фильтры видео (Этап 10, PLAN.md §19): Shorts / трансляции / возраст ----
+  // Global settings (not per profile): the worker's shared count cache applies
+  // them, so every edit ends with notifyWorker() → counters:settings → a
+  // storage-only recompute (no refetch) pushed to all tabs.
+
+  BUILDERS.filters = async function filters(host) {
+    const settings = await yga.profiles.getSettings();
+    const f = settings.filters || {};
+
+    const shorts = el("input", "yga-panel-check", { type: "checkbox" });
+    shorts.checked = !!f.hideShorts;
+    shorts.addEventListener("change", async () => {
+      await u.save("filters.hideShorts", shorts.checked);
+      u.notifyWorker();
+    });
+    host.appendChild(u.field("filterHideShorts", shorts, "filterHideShortsHint"));
+
+    const live = el("input", "yga-panel-check", { type: "checkbox" });
+    live.checked = !!f.hideLive;
+    live.addEventListener("change", async () => {
+      await u.save("filters.hideLive", live.checked);
+      u.notifyWorker();
+    });
+    host.appendChild(u.field("filterHideLive", live, "filterHideLiveHint"));
+
+    const maxAge = u.number(Math.max(0, Number(f.maxAgeDays) || 0), {
+      min: "0", max: "3650", step: "1"
+    });
+    maxAge.addEventListener("change", async () => {
+      const value = Math.max(0, Math.min(3650, Math.floor(Number(maxAge.value) || 0)));
+      maxAge.value = String(value);
+      await u.save("filters.maxAgeDays", value);
+      u.notifyWorker();
+    });
+    host.appendChild(u.field("filterMaxAgeDays", maxAge, "filterMaxAgeDaysHint"));
   };
 
   // ---- Виджет (§8.3, §8.6, §9) ----

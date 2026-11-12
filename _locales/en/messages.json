@@ -155,6 +155,34 @@
     "message": "Data",
     "description": "Panel section: export, import, reset"
   },
+  "sectionFilters": {
+    "message": "Filters",
+    "description": "Panel section: video filters for the counters"
+  },
+  "filterHideShorts": {
+    "message": "Hide Shorts",
+    "description": "Checkbox: exclude Shorts from new-video counters"
+  },
+  "filterHideShortsHint": {
+    "message": "Shorts do not count as new videos in the widget.",
+    "description": "Hint for the Hide Shorts checkbox"
+  },
+  "filterHideLive": {
+    "message": "Hide live streams",
+    "description": "Checkbox: exclude live streams from new-video counters"
+  },
+  "filterHideLiveHint": {
+    "message": "Live, upcoming and premiere streams do not count as new videos.",
+    "description": "Hint for the Hide live streams checkbox"
+  },
+  "filterMaxAgeDays": {
+    "message": "Max age, days",
+    "description": "Number field: hide videos older than N days"
+  },
+  "filterMaxAgeDaysHint": {
+    "message": "0 disables the age filter; older videos never count as new.",
+    "description": "Hint for the max age field"
+  },
   "accountLabel": {
     "message": "YouTube account",
     "description": "Caption of the account key in the profiles section"

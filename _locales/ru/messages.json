@@ -155,6 +155,34 @@
     "message": "Данные",
     "description": "Раздел панели: экспорт, импорт, сброс"
   },
+  "sectionFilters": {
+    "message": "Фильтры",
+    "description": "Раздел панели: фильтры видео для счётчиков"
+  },
+  "filterHideShorts": {
+    "message": "Скрывать Shorts",
+    "description": "Чекбокс: не считать Shorts новыми видео"
+  },
+  "filterHideShortsHint": {
+    "message": "Shorts не учитываются в счётчиках новых видео.",
+    "description": "Подсказка чекбокса «Скрывать Shorts»"
+  },
+  "filterHideLive": {
+    "message": "Скрывать трансляции",
+    "description": "Чекбокс: не считать трансляции новыми видео"
+  },
+  "filterHideLiveHint": {
+    "message": "Прямые, предстоящие и премьерные трансляции не считаются новыми видео.",
+    "description": "Подсказка чекбокса «Скрывать трансляции»"
+  },
+  "filterMaxAgeDays": {
+    "message": "Максимум дней",
+    "description": "Число: скрывать видео старше N дней"
+  },
+  "filterMaxAgeDaysHint": {
+    "message": "0 отключает фильтр; старые видео никогда не считаются новыми.",
+    "description": "Подсказка поля максимального возраста"
+  },
   "accountLabel": {
     "message": "Аккаунт YouTube",
     "description": "Подпись ключа аккаунта в разделе профилей"

@@ -17,10 +17,10 @@ const chains = []; // async sections; the report waits for all of them
   const feed = env.sandbox.yga.rssParser.parseVideosXml(fixture);
 
   check("parser: feed parsed", !!feed);
-  check("parser: 3 entries", feed && feed.entries.length === 3, feed && String(feed.entries.length));
+  check("parser: 5 entries", feed && feed.entries.length === 5, feed && String(feed.entries.length));
   check(
     "parser: ids",
-    feed && feed.entries.map((e) => e.videoId).join(",") === "aaa11111111,bbb22222222,ccc33333333",
+    feed && feed.entries.map((e) => e.videoId).join(",") === "aaa11111111,bbb22222222,ccc33333333,ddd44444444,eee55555555",
     feed && feed.entries.map((e) => e.videoId).join(",")
   );
   check(
@@ -49,6 +49,15 @@ const chains = []; // async sections; the report waits for all of them
   check("parser: feed title entity", feed && feed.title === "RSS Test Channel & Co.");
   check("parser: feed url", feed && feed.url === "https://www.youtube.com/channel/UC001");
   check("parser: watched flag default", feed && feed.entries[0].watched === false);
+  check("parser: label from media:title", feed && feed.entries[0].label === 'New "bold" <video> #1 — entities', feed && JSON.stringify(feed.entries[0].label));
+  check("parser: duration default 0", feed && feed.entries[0].duration === 0);
+  check("parser: category default empty", feed && feed.entries[1].category === "");
+  check(
+    "parser: shorts label + category",
+    feed && feed.entries[3].label === "YouTube Shorts" && feed.entries[3].category === "video",
+    feed && JSON.stringify([feed.entries[3].label, feed.entries[3].category])
+  );
+  check("parser: live label", feed && feed.entries[4].label === "Live", feed && feed.entries[4].label);
   check("parser: html page rejected", env.sandbox.yga.rssParser.parseVideosXml("<html><body>hi</body></html>") === null);
   check("parser: empty rejected", env.sandbox.yga.rssParser.parseVideosXml("") === null);
   check("parser: feed without entries rejected", env.sandbox.yga.rssParser.parseVideosXml("<feed></feed>") === null);
@@ -79,10 +88,10 @@ const chains = []; // async sections; the report waits for all of them
     let counts = await env.send({ type: "counters:get", profileId: "p_1", channelIds: [CH1, CH2] });
     check(
       "worker: newCount from fixture",
-      counts && counts.channelCounts[CH1].newCount === 3 && counts.channelCounts[CH2].newCount === 3,
+      counts && counts.channelCounts[CH1].newCount === 5 && counts.channelCounts[CH2].newCount === 5,
       JSON.stringify(counts.channelCounts)
     );
-    check("worker: total kept at 3", counts && counts.channelCounts[CH1].total === 3);
+    check("worker: total kept at 5", counts && counts.channelCounts[CH1].total === 5);
     check("worker: no error", counts && !counts.channelCounts[CH1].error);
     const at1 = counts && counts.channelCounts[CH1].at;
     check(
@@ -108,7 +117,7 @@ const chains = []; // async sections; the report waits for all of them
     const inm = env.fetchCalls[fetches1] && env.fetchCalls[fetches1].opts.headers["If-None-Match"];
     check("worker: ETag sent on 304 path", inm === "etag-v1", String(inm));
     counts = await env.send({ type: "counters:get", channelIds: [CH1] });
-    check("worker: 304 keeps entries", counts.channelCounts[CH1].total === 3 && counts.channelCounts[CH1].newCount === 3);
+    check("worker: 304 keeps entries", counts.channelCounts[CH1].total === 5 && counts.channelCounts[CH1].newCount === 5);
 
     // 429 both retries → honest error state, cache preserved
     const before429 = env.fetchCalls.length;
@@ -123,7 +132,7 @@ const chains = []; // async sections; the report waits for all of them
     check("worker: 429 retried once", env.fetchCalls.length - before429 === 2, String(env.fetchCalls.length - before429));
     counts = await env.send({ type: "counters:get", channelIds: [CH1] });
     check("worker: 429 marks error", counts.channelCounts[CH1].error > 0);
-    check("worker: 429 keeps old counts", counts.channelCounts[CH1].newCount === 3 && counts.channelCounts[CH1].total === 3);
+    check("worker: 429 keeps old counts", counts.channelCounts[CH1].newCount === 5 && counts.channelCounts[CH1].total === 5);
 
     // dedup inside one request; CH2's watched flag makes both writes
     // "changed" so they must coalesce into one merged bus message
@@ -155,7 +164,7 @@ const chains = []; // async sections; the report waits for all of them
     await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
     await flush();
     counts = await env.send({ type: "counters:get", channelIds: [CH1] });
-    check("worker: watched merge drops from newCount", counts.channelCounts[CH1].newCount === 2, JSON.stringify(counts.channelCounts));
+    check("worker: watched merge drops from newCount", counts.channelCounts[CH1].newCount === 4, JSON.stringify(counts.channelCounts));
 
     // setVisit writes composition + a lastVisitAt-aware aggregate (always
     // emitted, so every tab re-derives its view of this profile)
@@ -175,7 +184,7 @@ const chains = []; // async sections; the report waits for all of them
     const p1Expected = since(CH1, visit1) + since(CH2, 0);
     check(
       "worker: aggregate applies lastVisitAt",
-      agg.length > 0 && agg[agg.length - 1].newCount === p1Expected && p1Expected < 4,
+      agg.length > 0 && agg[agg.length - 1].newCount === p1Expected && p1Expected <= 4,
       JSON.stringify(agg[agg.length - 1]) + " expected " + p1Expected
     );
 
@@ -202,7 +211,7 @@ const chains = []; // async sections; the report waits for all of them
     const init = await env.send({ type: "counters:init", profileId: "p_1" });
     check(
       "worker: init returns snapshot counts",
-      init && init.ok && init.counts[CH1] && init.counts[CH1].newCount === 2,
+      init && init.ok && init.counts[CH1] && init.counts[CH1].newCount === 4,
       JSON.stringify(init && init.counts && init.counts[CH1])
     );
     check(
@@ -248,7 +257,7 @@ const chains = []; // async sections; the report waits for all of them
     await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH2] });
     await flush();
     counts = await env.send({ type: "counters:get", channelIds: [CH2] });
-    check("worker: garbage XML → error + cache kept", counts.channelCounts[CH2].error > 0 && counts.channelCounts[CH2].newCount === 2);
+    check("worker: garbage XML → error + cache kept", counts.channelCounts[CH2].error > 0 && counts.channelCounts[CH2].newCount === 4);
 
     // --- content-side view math (content/counters.js newSince) ------------
     const cenv = makeSandbox();
@@ -261,6 +270,67 @@ const chains = []; // async sections; the report waits for all of them
     check("newSince: future visit zeroes", ns([5, 4, 3], 9) === 0);
   })
     .catch((e) => failures.push("worker section crashed: " + e)));
+}
+
+// --- 3. worker: stage-10 filters (Shorts / live / maxAgeDays) -------------
+// Filter edits must repaint counts from the cached entries — no refetch —
+// and push both per-channel counts and per-profile aggregates to the tabs.
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+
+  chains.push(env.sandbox.chrome.storage.local.set({
+    "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One" }],
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+  }).then(async () => {
+    let res = await env.send({ type: "counters:refresh", profileId: "p_1" });
+    check("filters: refresh queued", res && res.ok && res.requested === 1, JSON.stringify(res));
+    await flush();
+
+    const get = async () =>
+      (await env.send({ type: "counters:get", profileId: "p_1", channelIds: [CH1] })).channelCounts[CH1];
+    const setFilters = async (filters) => {
+      const s = env.storage.get("yga:settings");
+      s.filters = filters;
+      await env.sandbox.chrome.storage.local.set({ "yga:settings": s });
+      await env.send({ type: "counters:settings" });
+      await flush();
+    };
+
+    let counts = await get();
+    check("filters: off counts every entry", counts.newCount === 5 && counts.at.length === 5, JSON.stringify(counts));
+    const fetches = env.fetchCalls.length;
+
+    await setFilters({ hideShorts: true });
+    counts = await get();
+    check("filters: hideShorts drops the short", counts.newCount === 4, JSON.stringify(counts));
+
+    await setFilters({ hideShorts: true, hideLive: true });
+    counts = await get();
+    check("filters: hideLive drops the live entry", counts.newCount === 3, JSON.stringify(counts));
+
+    await setFilters({ hideShorts: true, hideLive: true, maxAgeDays: 1 });
+    counts = await get();
+    check("filters: maxAgeDays drops old entries", counts.newCount === 0 && counts.at.length === 0, JSON.stringify(counts));
+
+    await setFilters({ hideShorts: true, hideLive: true, maxAgeDays: 0 });
+    counts = await get();
+    check("filters: maxAgeDays 0 disables the age filter", counts.newCount === 3, JSON.stringify(counts));
+
+    await setFilters({});
+    counts = await get();
+    check("filters: off restores the full count", counts.newCount === 5, JSON.stringify(counts));
+    check("filters: recompute never refetches", env.fetchCalls.length === fetches, env.fetchCalls.length + " vs " + fetches);
+
+    const countsMsgs = env.bus.filter((m) => m.type === "counters:counts" && m.counts[CH1]);
+    check("filters: counts pushed to tabs", countsMsgs.length > 0, String(countsMsgs.length));
+    const aggs = env.bus.filter((m) => m.type === "counters:aggregate" && m.profileId === "p_1");
+    check("filters: aggregate pushed to tabs", aggs.length > 0 && aggs[aggs.length - 1].newCount === 5, JSON.stringify(aggs[aggs.length - 1]));
+  })
+    .catch((e) => failures.push("filters section crashed: " + e)));
 }
 
 // --- 4. content world end-to-end: right-click reset must reach the row ----
@@ -395,7 +465,7 @@ const chains = []; // async sections; the report waits for all of them
       let list = await c.state.getVisibleSubs();
       check(
         "content: row counts all unwatched before visit",
-        !!list && list.length === 1 && list[0].newCount === 3,
+        !!list && list.length === 1 && list[0].newCount === 5,
         JSON.stringify(list && list.map((s) => s.newCount))
       );
 
@@ -436,7 +506,7 @@ const chains = []; // async sections; the report waits for all of them
       list = await c.state.getVisibleSubs();
       check(
         "content: other profile keeps its own count",
-        !!list && list.length === 1 && list[0].newCount === 3,
+        !!list && list.length === 1 && list[0].newCount === 5,
         "newCount=" + (list && list[0].newCount)
       );
     })

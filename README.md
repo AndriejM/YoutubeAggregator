@@ -20,9 +20,13 @@ research is kept under `examples/` and is not part of the shipped extension.
   a channel belongs to exactly one group per profile.
 - **New-video counters** — per channel, from the public RSS feed
   (`/feeds/videos.xml`), batched and throttled, cached with ETags. A click on a channel
-  opens its Videos tab and resets its counter.
+  opens its Videos tab and resets its counter; right-click resets a channel, a group or
+  the total header counter.
+- **Video filters** — globally hide Shorts, live streams and videos older than N days from
+  the counters; edits repaint instantly from the cached entries (no refetch).
 - **Inline configuration panel** — opens in YouTube's main content area (no iframe, no
-  extra tab): profiles, groups, channels, counters, widget, theme, data (export/import/reset).
+  extra tab): profiles, groups, channels, counters, filters, widget, theme, data
+  (export/import/reset).
   Channel rows include an open-in-new-tab link (↗).
 - **Group button on channel pages** — assign the channel to a group of the active profile
   right from the channel header.
@@ -102,8 +106,9 @@ no long tasks and no layout thrashing (interleaved read/write).
   the previous number is kept. Press ↻ in the widget header to retry.
 - **Counters capped at `15+`.** The RSS feed only exposes the ~15 latest videos per
   channel — by design.
-- **Counters do not reset.** Only a click *in the widget* (or right-click → mark watched)
-  resets a counter; opening the channel elsewhere does not (MVP decision, PLAN.md §10.5).
+- **Counters do not reset.** Only a click *in the widget* or right-click on a channel,
+  group or total header chip resets counters; opening the channel elsewhere does not
+  (MVP decision, PLAN.md §10.5).
 - **Widget looks wrong after a YouTube update.** Disable the extension to confirm the
   conflict, then check `content/widget.css` (`/* YT-override */` comments) and
   `content/selectors.js`.

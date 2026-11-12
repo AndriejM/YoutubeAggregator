@@ -40,25 +40,34 @@ window.yga = window.yga || {};
     return text;
   }
 
-  function updateTotal(widget) {
+  function localAggregate() {
+    const list = yga.widget && yga.widget.lastRendered && yga.widget.lastRendered();
+    if (!list) return null;
+    const agg = yga.state.getAggregate();
+    let sum = 0;
+    let errorCount = 0;
+    for (const s of list) {
+      if (s.counterError) errorCount++;
+      sum += s.newCount || 0;
+    }
+    return {
+      profileId: agg && agg.profileId,
+      newCount: sum,
+      errorCount: errorCount,
+      stale: !!(agg && agg.stale)
+    };
+  }
+
+  function updateTotal(widget, local) {
     const header = widget && widget.querySelector(".yga-header");
     if (!header) return;
     const total = header.querySelector(".yga-total");
     if (!total) return;
-    let agg = yga.state.getAggregate();
+    let agg = local ? localAggregate() : yga.state.getAggregate();
     if ((!agg || !agg.newCount) && yga.state.countersReady()) {
       // Fallback: sum the visible rows (lastVisitAt view, like PocketTube's
       // badge) so the chip never contradicts the list next to it.
-      const list = yga.widget.lastRendered && yga.widget.lastRendered();
-      if (list) {
-        let sum = 0;
-        let errorCount = 0;
-        for (const s of list) {
-          if (s.counterError) errorCount++;
-          sum += s.newCount;
-        }
-        agg = { profileId: agg && agg.profileId, newCount: sum, errorCount: errorCount, stale: !!(agg && agg.stale) };
-      }
+      agg = localAggregate() || agg;
     }
     const text = agg ? formatTotal(agg) : "";
     total.textContent = text;
@@ -67,8 +76,30 @@ window.yga = window.yga || {};
     total.classList.toggle("yga-stale", !!(agg && agg.stale));
   }
 
+  async function resetAll(widget) {
+    const profileId = yga.profiles && yga.profiles.lastActiveId();
+    const list = yga.widget && yga.widget.lastRendered && yga.widget.lastRendered();
+    if (!profileId || !list || !list.length) return;
+    const ids = list.map((s) => s.channelId).filter(Boolean);
+    if (!ids.length) return;
+    const visitAt = await yga.state.markVisitedBatch(profileId, ids);
+    if (!visitAt) return;
+    for (const s of list) {
+      s.lastVisitAt = visitAt;
+      s.newCount = 0;
+    }
+    if (yga.widget.applyCounts) yga.widget.applyCounts(list);
+    updateTotal(widget, true);
+  }
+
   yga.counters = {
     newSince: newSince,
+    updateTotal(widget) {
+      updateTotal(widget);
+    },
+    paintLocalTotal(widget) {
+      updateTotal(widget, true);
+    },
 
     // Stage 8: the total chip and the refresh button live in the widget header
     // (to the right of the title), not in a separate toolbar row. The refresh
@@ -81,6 +112,11 @@ window.yga = window.yga || {};
       if (!header.querySelector(".yga-total")) {
         const total = document.createElement("span");
         total.className = "yga-total";
+        total.addEventListener("contextmenu", (ev) => {
+          if (ev.ctrlKey) return;
+          ev.preventDefault();
+          resetAll(widget);
+        });
         header.insertBefore(total, before);
       }
       if (!header.querySelector(".yga-refresh")) {

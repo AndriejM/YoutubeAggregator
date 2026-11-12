@@ -67,9 +67,11 @@
     return colon >= 0 ? name.slice(colon + 1) : name;
   }
 
-  // `<media:group>` block → { thumbnail, community }: media:thumbnail with
-  // height=1 (feed order: [0] = channel avatar, [1] = video thumb) and
-  // media:community statistics views/ratings.
+  // `<media:group>` block → { thumbnail, community, label, duration }:
+  // media:thumbnail with height=1 (feed order: [0] = channel avatar,
+  // [1] = video thumb), media:community statistics views/ratings and the
+  // stage-10 filter fields: media:title label ("YouTube Shorts" / "Live")
+  // and media:duration seconds.
   function mediaGroup(block, lower) {
     const open = lower.indexOf("<media:group");
     if (open < 0) return {};
@@ -77,6 +79,10 @@
     const body = block.slice(open, close < 0 ? block.length : close);
     const bodyLower = lower.slice(open, close < 0 ? block.length : close);
     const out = {};
+
+    out.label = innerText(body, bodyLower, "media:title", 0);
+    const duration = parseInt(innerText(body, bodyLower, "media:duration", 0), 10);
+    out.duration = Number.isFinite(duration) && duration > 0 ? duration : 0;
 
     const thumbs = [];
     const re = /<media:thumbnail[^>]*>/g;
@@ -118,12 +124,19 @@
     const publishedAt = Date.parse(innerText(block, lower, "published", 0) || "") || 0;
     if (!publishedAt) return null;
     const media = mediaGroup(block, lower);
+    // Stage 10 filters: the top-level <category scheme> distinguishes
+    // movies/episodes/shows from plain videos (absent = "video").
+    const cat = /<category[^>]*scheme="([^"]*)"/i.exec(block);
+    const categoryValue = cat ? cat[1].trim().split(/[\/#\s]+/).pop().toLowerCase() : "";
     return {
       videoId: videoId,
       title: innerText(block, lower, "title", 0).slice(0, MAX_TEXT),
       publishedAt: publishedAt,
       thumbnail: media.thumbnail || "",
       views: media.community ? media.community.views : 0,
+      label: media.label || "",
+      duration: media.duration || 0,
+      category: categoryValue,
       watched: false
     };
   }

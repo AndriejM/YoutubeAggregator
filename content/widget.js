@@ -502,6 +502,9 @@ window.yga = window.yga || {};
         sub.newCount = 0;
         paintCount(row, sub);
         paintGroupChips();
+        if (yga.counters && yga.counters.paintLocalTotal) {
+          yga.counters.paintLocalTotal(document.querySelector('[data-yga="widget"]'));
+        }
       });
     });
 
@@ -667,6 +670,26 @@ window.yga = window.yga || {};
     btn.appendChild(name);
     btn.appendChild(chip);
     btn.addEventListener("click", () => toggleGroup(g));
+    btn.addEventListener("contextmenu", (ev) => {
+      if (ev.ctrlKey) return;
+      ev.preventDefault();
+      const profileId = yga.profiles && yga.profiles.lastActiveId();
+      const live = groupChips.get(key) || { members: members };
+      const ids = live.members.map((s) => s.channelId).filter(Boolean);
+      if (!profileId || !ids.length) return;
+      yga.state.markVisitedBatch(profileId, ids).then((visitAt) => {
+        if (!visitAt) return;
+        for (const s of live.members) {
+          s.lastVisitAt = visitAt;
+          s.newCount = 0;
+        }
+        if (yga.widget.applyCounts) yga.widget.applyCounts(lastList);
+        else paintGroupChips();
+        if (yga.counters && yga.counters.paintLocalTotal) {
+          yga.counters.paintLocalTotal(document.querySelector('[data-yga="widget"]'));
+        }
+      });
+    });
     wrap.appendChild(btn);
 
     if (!collapsed) {

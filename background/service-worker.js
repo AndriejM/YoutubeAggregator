@@ -58,6 +58,32 @@ function refreshCfg(settings) {
   };
 }
 
+// Stage 10 (PLAN.md §19): video filters are global settings, not per profile —
+// the shared count cache stays profile-blind (§10.4) and one recompute serves
+// every tab. Defaults = all filters off (behaviour identical to stage 9).
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function filtersCfg(settings) {
+  const f = (settings && settings.filters) || {};
+  return {
+    hideShorts: !!f.hideShorts,
+    hideLive: !!f.hideLive,
+    maxAgeDays: Number.isFinite(f.maxAgeDays) && f.maxAgeDays > 0 ? f.maxAgeDays : 0
+  };
+}
+
+// Shorts: the media:title label is "YouTube Shorts" (category stays "video").
+// Live: label "Live" — YouTube also labels upcoming/premiere streams, so
+// those are hidden together with live.
+function entryVisible(e, filters, at) {
+  if (!e || !e.publishedAt) return false;
+  const label = String(e.label || "").toLowerCase();
+  if (filters.hideShorts && label.indexOf("shorts") >= 0) return false;
+  if (filters.hideLive && label.indexOf("live") >= 0) return false;
+  if (filters.maxAgeDays && at - e.publishedAt > filters.maxAgeDays * DAY_MS) return false;
+  return true;
+}
+
 function videoKey(id) {
   return VIDEO_PREFIX + id;
 }
@@ -115,45 +141,49 @@ async function loadProfileChannels(profileId) {
   return data ? data.ids : null;
 }
 
-// Unbounded count (lastVisitAt = 0): "everything not manually marked watched".
-function computeCounts(record) {
+// Unbounded count (lastVisitAt = 0): "everything not manually marked watched"
+// and not hidden by the stage-10 filters.
+function computeCounts(record, filters, at) {
   const entries = (record && record.entries) || [];
   let newCount = 0;
   for (const e of entries) {
-    if (!e.watched) newCount++;
+    if (!e.watched && entryVisible(e, filters, at)) newCount++;
   }
   return newCount;
 }
 
-// publishedAt of every unwatched entry, newest first. The worker stays
-// profile-blind: the content world derives the per-profile view as
-// `at.filter(t => t > lastVisitAt).length` (PLAN.md §10.4), so one shared
+// publishedAt of every unwatched, filter-visible entry, newest first. The
+// worker stays profile-blind: the content world derives the per-profile view
+// as `at.filter(t => t > lastVisitAt).length` (PLAN.md §10.4), so one shared
 // cache serves every profile and a reset in one profile cannot leak into
 // another.
-function unwatchedAt(record) {
+function unwatchedAt(record, filters, at) {
   const entries = (record && record.entries) || [];
-  const at = [];
+  const out = [];
   for (const e of entries) {
-    if (!e.watched && e.publishedAt) at.push(e.publishedAt);
+    if (!e.watched && e.publishedAt && entryVisible(e, filters, at)) out.push(e.publishedAt);
   }
-  return at.sort((a, b) => b - a);
+  return out.sort((a, b) => b - a);
 }
 
-function countValue(record) {
+function countValue(record, filters, at) {
   return {
-    newCount: (record && record.newCount) || 0,
+    // Recomputed from entries, never the stored record.newCount: a filter
+    // change must repaint counts without a refetch.
+    newCount: computeCounts(record, filters, at),
     fetchedAt: (record && record.fetchedAt) || 0,
     error: (record && record.error) || 0,
-    at: unwatchedAt(record)
+    at: unwatchedAt(record, filters, at)
   };
 }
 
-// Profile-scoped count: unwatched AND published after that profile's visit.
-function countSince(record, lastVisitAt) {
-  const at = unwatchedAt(record);
-  if (!lastVisitAt) return at.length;
+// Profile-scoped count: unwatched AND filter-visible AND published after that
+// profile's visit.
+function countSince(record, lastVisitAt, filters, at) {
+  const at2 = unwatchedAt(record, filters, at);
+  if (!lastVisitAt) return at2.length;
   let n = 0;
-  for (const t of at) if (t > lastVisitAt) n++;
+  for (const t of at2) if (t > lastVisitAt) n++;
   return n;
 }
 
@@ -169,6 +199,9 @@ function sameCountValue(a, b) {
 }
 
 async function recomputeAllCounts() {
+  const settings = await getSettings();
+  const filters = filtersCfg(settings);
+  const at = now();
   const index = await chrome.storage.local.get(VIDEOS_INDEX);
   const ids = Object.keys(index[VIDEOS_INDEX] || {});
   const records = await loadVideoRecords(ids);
@@ -177,7 +210,7 @@ async function recomputeAllCounts() {
   const counts = {};
   for (const id of ids) {
     const rec = records.get(id) || {};
-    const value = countValue(rec);
+    const value = countValue(rec, filters, at);
     countCache.set(id, value);
     counts[id] = value;
   }
@@ -202,8 +235,10 @@ async function bumpVideosIndex(ids) {
 // sum of the row counters a tab renders; force=true still emits so a visit
 // reset travels even when the total happens to be unchanged.
 async function emitProfileCounts(profileId, force) {
-  const data = await profileData(profileId);
+  const [data, settings] = await Promise.all([profileData(profileId), getSettings()]);
   if (!data) return;
+  const filters = filtersCfg(settings);
+  const at = now();
   const ids = data.ids;
   const comp = data.comp;
   const records = await loadVideoRecords(ids);
@@ -212,7 +247,7 @@ async function emitProfileCounts(profileId, force) {
   let stale = false;
   for (const id of ids) {
     const rec = records.get(id) || {};
-    newCount += countSince(rec, (comp[id] || {}).lastVisitAt);
+    newCount += countSince(rec, (comp[id] || {}).lastVisitAt, filters, at);
     if (rec.error) errorCount++;
     if (rec.fetchedAt && now() - rec.fetchedAt > STALE_MS) stale = true;
   }
@@ -284,13 +319,16 @@ function mergeEntries(feed, prev) {
 }
 
 async function writeRecord(channelId, record) {
-  record.newCount = computeCounts(record);
+  const settings = await getSettings();
+  const filters = filtersCfg(settings);
+  const at = now();
+  record.newCount = computeCounts(record, filters, at);
   const payload = {};
   payload[videoKey(channelId)] = record;
   await chrome.storage.local.set(payload);
   await bumpVideosIndex([channelId]);
 
-  const value = countValue(record);
+  const value = countValue(record, filters, at);
   const prev = countCache.get(channelId);
   countCache.set(channelId, value);
   const changed = !prev || !sameCountValue(prev, value);
@@ -522,10 +560,13 @@ function handleCounters(msg) {
     case "counters:get":
       return (async () => {
         const ids = Array.isArray(msg.channelIds) ? msg.channelIds : [];
+        const settings = await getSettings();
+        const filters = filtersCfg(settings);
+        const at = now();
         const records = await loadVideoRecords(ids);
         const channelCounts = {};
         for (const [id, rec] of records) {
-          channelCounts[id] = countValue(rec);
+          channelCounts[id] = countValue(rec, filters, at);
           channelCounts[id].total = (rec.entries || []).length;
         }
         return {
@@ -547,9 +588,17 @@ function handleCounters(msg) {
         return { ok: true, counts: counts, aggregate: aggregate, aggregateSeq: aggregateSeq };
       })();
 
+    // Filter edits (stage 10): counts are derived from cached entries, so a
+    // filter change needs no refetch — recompute from storage and push both
+    // the per-channel counts and every profile's aggregate to the tabs.
     case "counters:settings":
       return (async () => {
         await syncAlarm();
+        await recomputeAllCounts();
+        const stored = await chrome.storage.local.get("yga:profiles");
+        for (const profileId of Object.keys(stored["yga:profiles"] || {})) {
+          await emitProfileCounts(profileId, true);
+        }
         return { ok: true };
       })();
 

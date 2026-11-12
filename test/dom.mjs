@@ -630,8 +630,8 @@ env.sandbox.chrome.storage.local
         root.classList.contains("yga-scroll-lock")
     );
     check(
-      "panel: seven tabs, one section built (§9.2.3)",
-      panel.querySelectorAll(".yga-panel-tab").length === 7 &&
+      "panel: eight tabs, one section built (§9.2.3)",
+      panel.querySelectorAll(".yga-panel-tab").length === 8 &&
         panel.querySelectorAll("[data-section]").length === 1,
       panel.querySelectorAll(".yga-panel-tab").length + "/" +
         panel.querySelectorAll("[data-section]").length
@@ -1714,6 +1714,83 @@ globalThis.innerWidth = 1280;
       "telemetry: selector miss is journaled to yga:log (stage 6)",
       entries.some((e) => e.kind === "selector-miss" && e.detail === "test-miss-anchor"),
       JSON.stringify(entries)
+    );
+
+    // --- stage 10: bulk counter resets (group + header total) --------------
+    await yga.state.updateSubs([
+      { channelId: CH1, title: "One", avatarUrl: "" },
+      { channelId: CH2, title: "Two", avatarUrl: "" }
+    ]);
+    const pReset = await yga.profiles.create("Reset");
+    await yga.profiles.addChannel(pReset.id, CH1);
+    await yga.profiles.addChannel(pReset.id, CH2);
+    await yga.profiles.setActiveProfile(pReset.id);
+    await yga.state.refreshVisible();
+    await env.send({ type: "counters:refresh", profileId: pReset.id, force: true });
+    await flush(40);
+    const resetInit = await env.send({ type: "counters:init", profileId: pReset.id });
+    yga.state.applyInitSnapshot(resetInit.counts, resetInit.aggregate, resetInit.aggregateSeq);
+    const resetGroup = await yga.groups.create("Reset group", pReset.id);
+    await yga.profiles.setGroup(pReset.id, [CH1], resetGroup.id);
+    await yga.state.refreshVisible();
+    await flush(20);
+
+    const resetWidget = document.querySelector('[data-yga="widget"]');
+    const resetList = await yga.state.getVisibleSubs();
+    yga.widget.render(resetList);
+    await flush(20);
+
+    const ctx = () => ({
+      type: "contextmenu",
+      ctrlKey: false,
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }
+    });
+    const rowChip = (id) => {
+      const r = resetWidget.querySelector('[data-yga-row="' + id + '"]');
+      return r && r.querySelector(".yga-count");
+    };
+    const hidden = (node) =>
+      !node || node.textContent === "" || node.textContent === "0" || node.classList.contains("yga-hidden");
+
+    const resetGroupBtn = resetWidget.querySelector(".yga-group");
+    const resetGroupChip = resetGroupBtn && resetGroupBtn.querySelector(".yga-group-count");
+    const resetTotal = resetWidget.querySelector(".yga-total");
+    check(
+      "reset: group and total counters are visible before right-click",
+      !!resetGroupBtn && !!resetGroupChip && resetGroupChip.textContent === "16" &&
+        !!resetTotal && resetTotal.textContent === "32+",
+      JSON.stringify({ group: resetGroupChip && resetGroupChip.textContent, total: resetTotal && resetTotal.textContent })
+    );
+
+    const groupCtx = ctx();
+    resetGroupBtn.dispatchEvent(groupCtx);
+    check("reset: group contextmenu default prevented", groupCtx.defaultPrevented);
+    await flush(40);
+    check(
+      "reset: right-click group clears only its channels",
+      hidden(rowChip(CH1)) && !hidden(rowChip(CH2)) && hidden(resetGroupChip) &&
+        !!resetTotal && resetTotal.textContent === "16+",
+      JSON.stringify({
+        ch1: rowChip(CH1) && rowChip(CH1).textContent,
+        ch2: rowChip(CH2) && rowChip(CH2).textContent,
+        group: resetGroupChip && resetGroupChip.textContent,
+        total: resetTotal && resetTotal.textContent
+      })
+    );
+
+    const totalCtx = ctx();
+    resetTotal.dispatchEvent(totalCtx);
+    check("reset: total contextmenu default prevented", totalCtx.defaultPrevented);
+    await flush(40);
+    check(
+      "reset: right-click total clears every visible channel",
+      hidden(rowChip(CH1)) && hidden(rowChip(CH2)) && hidden(resetTotal),
+      JSON.stringify({
+        ch1: rowChip(CH1) && rowChip(CH1).textContent,
+        ch2: rowChip(CH2) && rowChip(CH2).textContent,
+        total: resetTotal && resetTotal.textContent
+      })
     );
 
     report();
