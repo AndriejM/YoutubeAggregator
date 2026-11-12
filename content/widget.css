@@ -23,9 +23,11 @@
    header row is too narrow to also fit a select. The widget is for viewing;
    everything else lives in the configuration panel (§9.2). */
 .yga-widget-title {
-  /* Shrinkable: at narrow guide widths the title ellipsizes instead of
+  /* Grow/shrink: the title fills the free header space so the total chip and
+     header buttons stay pinned to the right edge when the chip appears or
+     disappears. At narrow guide widths the title ellipsizes instead of
      pushing the last header button past the sidebar edge. */
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 15px;
   font-weight: 500;
