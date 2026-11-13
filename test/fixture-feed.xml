@@ -60,7 +60,7 @@
   </entry>
   <entry>
    <title>Quick short</title>
-   <link rel="alternate" type="text/html" href="https://www.youtube.com/watch?v=ddd44444444"/>
+   <link rel="alternate" type="text/html" href="https://www.youtube.com/shorts/ddd44444444"/>
    <id>yt:video:ddd44444444</id>
    <yt:videoId>ddd44444444</yt:videoId>
    <yt:channelId>UCtestchannel0000000000A</yt:channelId>
@@ -68,7 +68,7 @@
    <updated>2026-11-08T08:00:00.000Z</updated>
    <category scheme="https://www.youtube.com/2007/terminal#category_type video"/>
    <media:group>
-    <media:title type="plain">YouTube Shorts</media:title>
+    <media:title type="plain">Quick short</media:title>
     <media:thumbnail url="https://i.ytimg.com/vi/ddd44444444/oar2.jpg" height="360" width="480"/>
     <media:thumbnail url="https://yt3.ggpht.com/avatar4=s160" height="1" width="1"/>
     <media:community media:statistics="views=42 ratings=0"/>
@@ -76,14 +76,14 @@
   </entry>
   <entry>
    <title>Weekly live stream</title>
-   <link rel="alternate" type="text/html" href="https://www.youtube.com/watch?v=eee55555555"/>
+   <link rel="alternate" type="text/html" href="https://www.youtube.com/live/eee55555555"/>
    <id>yt:video:eee55555555</id>
    <yt:videoId>eee55555555</yt:videoId>
    <yt:channelId>UCtestchannel0000000000A</yt:channelId>
    <published>2026-11-08T07:00:00.000Z</published>
    <updated>2026-11-08T07:00:00.000Z</updated>
    <media:group>
-    <media:title type="plain">Live</media:title>
+    <media:title type="plain">Weekly live stream</media:title>
     <media:thumbnail url="https://i.ytimg.com/vi/eee55555555/hqdefault_live.jpg" height="360" width="480"/>
     <media:thumbnail url="https://yt3.ggpht.com/avatar5=s160" height="1" width="1"/>
     <media:community media:statistics="views=8 ratings=0"/>

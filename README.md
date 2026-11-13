@@ -26,7 +26,9 @@ research is kept under `examples/` and is not part of the shipped extension.
   opens its Videos tab and resets its counter; right-click resets a channel, a group or
   the total header counter.
 - **Video filters** — globally hide Shorts, live streams and videos older than N days from
-  the counters; edits repaint instantly from the cached entries (no refetch).
+  the counters; Shorts/live are classified by the feed entry URL (`/shorts/`, `/live/`),
+  not by the title, and edits repaint instantly from the cached entries (entries cached
+  before the kind field existed are refetched once).
 - **Inline configuration panel** — opens in YouTube's main content area (no iframe, no
   extra tab): profiles, groups, channels, counters, filters, widget, theme, data
   (export/import/reset).

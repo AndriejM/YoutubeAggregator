@@ -53,11 +53,31 @@ const chains = []; // async sections; the report waits for all of them
   check("parser: duration default 0", feed && feed.entries[0].duration === 0);
   check("parser: category default empty", feed && feed.entries[1].category === "");
   check(
-    "parser: shorts label + category",
-    feed && feed.entries[3].label === "YouTube Shorts" && feed.entries[3].category === "video",
-    feed && JSON.stringify([feed.entries[3].label, feed.entries[3].category])
+    "parser: shorts kind + category",
+    feed && feed.entries[3].kind === "shorts" && feed.entries[3].category === "video",
+    feed && JSON.stringify([feed.entries[3].kind, feed.entries[3].category])
   );
-  check("parser: live label", feed && feed.entries[4].label === "Live", feed && feed.entries[4].label);
+  check("parser: live kind", feed && feed.entries[4].kind === "live", feed && feed.entries[4].kind);
+  check(
+    "parser: watch links are video",
+    feed && feed.entries.slice(0, 3).every((e) => e.kind === "video"),
+    feed && feed.entries.map((e) => e.kind).join(",")
+  );
+  // Real feeds put the video title in media:title, so a title that merely
+  // mentions Shorts/Live must not classify the entry (stage-10 filter bug).
+  const titled = env.sandbox.yga.rssParser.parseVideosXml(
+    "<feed><entry><title>Shorts roundup &amp; Live recap</title>" +
+      "<link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=abcdef12345\"/>" +
+      "<yt:videoId>abcdef12345</yt:videoId>" +
+      "<published>2026-11-08T09:00:00.000Z</published>" +
+      "<media:group><media:title>Shorts roundup &amp; Live recap</media:title></media:group>" +
+      "</entry></feed>"
+  );
+  check(
+    "parser: title mentioning Shorts/Live stays video",
+    titled && titled.entries[0].kind === "video",
+    JSON.stringify(titled && titled.entries[0])
+  );
   check("parser: html page rejected", env.sandbox.yga.rssParser.parseVideosXml("<html><body>hi</body></html>") === null);
   check("parser: empty rejected", env.sandbox.yga.rssParser.parseVideosXml("") === null);
   check("parser: feed without entries rejected", env.sandbox.yga.rssParser.parseVideosXml("<feed></feed>") === null);
@@ -369,6 +389,89 @@ const chains = []; // async sections; the report waits for all of them
     check("filters: aggregate pushed to tabs", aggs.length > 0 && aggs[aggs.length - 1].newCount === 5, JSON.stringify(aggs[aggs.length - 1]));
   })
     .catch((e) => failures.push("filters section crashed: " + e)));
+}
+
+// --- 3b. worker: filter kind comes from the feed URL, not the title --------
+// Browser report 2026-11-13: with hideShorts on, a fresh Short still counted
+// as a new video (media:title is the video title), and a video titled
+// «…Live…» was hidden by hideLive. Kind is the entry's alternate-link path.
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+
+  const kindFeed =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+    "<feed xmlns:yt=\"http://www.youtube.com/xml/schemas/2015\" xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns=\"http://www.w3.org/2005/Atom\">\n" +
+    " <title>Kind Feed</title>\n" +
+    " <yt:channelId>" + CH1 + "</yt:channelId>\n" +
+    " <entry>\n  <title>Shorts roundup &amp; Live recap</title>\n" +
+    "  <link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=k1aaaaaaaaa\"/>\n" +
+    "  <yt:videoId>k1aaaaaaaaa</yt:videoId>\n  <yt:channelId>" + CH1 + "</yt:channelId>\n" +
+    "  <published>2026-11-12T09:00:00.000Z</published>\n" +
+    "  <media:group><media:title>Shorts roundup &amp; Live recap</media:title></media:group>\n" +
+    " </entry>\n" +
+    " <entry>\n  <title>Fresh short</title>\n" +
+    "  <link rel=\"alternate\" href=\"https://www.youtube.com/shorts/k2bbbbbbbbb\"/>\n" +
+    "  <yt:videoId>k2bbbbbbbbb</yt:videoId>\n  <yt:channelId>" + CH1 + "</yt:channelId>\n" +
+    "  <published>2026-11-12T08:00:00.000Z</published>\n" +
+    "  <media:group><media:title>Fresh short</media:title></media:group>\n" +
+    " </entry>\n" +
+    " <entry>\n  <title>Weekly stream</title>\n" +
+    "  <link rel=\"alternate\" href=\"https://www.youtube.com/live/k3ccccccccc\"/>\n" +
+    "  <yt:videoId>k3ccccccccc</yt:videoId>\n  <yt:channelId>" + CH1 + "</yt:channelId>\n" +
+    "  <published>2026-11-12T07:00:00.000Z</published>\n" +
+    "  <media:group><media:title>Weekly stream</media:title></media:group>\n" +
+    " </entry>\n" +
+    "</feed>\n";
+
+  chains.push(env.sandbox.chrome.storage.local.set({
+    "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One" }],
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 }, filters: {} }
+  }).then(async () => {
+    env.setResponder(() => ({ status: 200, body: kindFeed, etag: "etag-kind" }));
+    await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
+    await flush();
+
+    const get = async () =>
+      (await env.send({ type: "counters:get", profileId: "p_1", channelIds: [CH1] })).channelCounts[CH1];
+    const setFilters = async (filters) => {
+      const s = env.storage.get("yga:settings");
+      s.filters = filters;
+      await env.sandbox.chrome.storage.local.set({ "yga:settings": s });
+      return env.send({ type: "counters:settings" });
+    };
+
+    let counts = await get();
+    check("kind filters: off counts all three", counts.newCount === 3, JSON.stringify(counts));
+
+    await setFilters({ hideShorts: true });
+    counts = await get();
+    check("kind filters: hideShorts drops the /shorts entry", counts.newCount === 2, JSON.stringify(counts));
+    check("kind filters: title mentioning Shorts still counts", counts.at.length === 2, JSON.stringify(counts));
+
+    await setFilters({ hideShorts: true, hideLive: true });
+    counts = await get();
+    check("kind filters: hideLive drops the /live entry", counts.newCount === 1, JSON.stringify(counts));
+    check("kind filters: title mentioning Live still counts", counts.at.length === 1, JSON.stringify(counts));
+
+    await setFilters({});
+    counts = await get();
+    check("kind filters: off restores three", counts.newCount === 3, JSON.stringify(counts));
+
+    // A cache written before `kind` existed cannot be classified from storage.
+    const legacy = clone(env.storage.get("yga:videos:" + CH1));
+    for (const e of legacy.entries) delete e.kind;
+    await env.sandbox.chrome.storage.local.set({ ["yga:videos:" + CH1]: legacy });
+    const res = await setFilters({ hideShorts: true });
+    check("kind filters: unclassified cache triggers refetch", res && res.ok && res.migrating === 1, JSON.stringify(res));
+    await flush(40);
+    counts = await get();
+    check("kind filters: refetch reclassifies the cache", counts.newCount === 2, JSON.stringify(counts));
+  })
+    .catch((e) => failures.push("kind filter section crashed: " + e)));
 }
 
 // --- 4. content world end-to-end: right-click reset must reach the row ----

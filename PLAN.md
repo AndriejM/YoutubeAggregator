@@ -1157,14 +1157,19 @@ PocketTube) и слева от Like/Dislike на видео; по одной м�
 фильтры выключены — поведение идентично этапу 9.
 
 1. **Парсер.** `content/rss-parser.js`: у записи появились поля `label` (текст
-   `media:title` внутри `media:group` — «YouTube Shorts» / «Live»), `duration`
-   (`media:duration`, секунды) и `category` (последний токен `scheme` верхнеуровневого
-   `<category>`: `video`/`movies`/`episodes`/`shows`).
+   `media:title` внутри `media:group` — это заголовок видео), `kind` (`video` /
+   `shorts` / `live` — путь ссылки `link rel="alternate"`: `youtube.com/shorts/<id>`,
+   `youtube.com/live/<id>`), `duration` (`media:duration`, секунды) и `category`
+   (последний токен `scheme` верхнеуровневого `<category>`: `video`/`movies`/
+   `episodes`/`shows`).
 2. **Worker.** `background/service-worker.js`: `filtersCfg()` (дефолты — все выкл),
-   `entryVisible()` (Shorts — `label` содержит «shorts», live — «live», возраст —
+   `entryVisible()` (Shorts — `kind === "shorts"`, live — `kind === "live"`, возраст —
    `at - publishedAt > maxAgeDays·сутки`); `computeCounts`/`unwatchedAt`/`countValue`/
    `countSince` применяют фильтры; `counters:settings` пересчитывает счётчики из кэша
-   записей **без рефетча** и рассылает `counters:counts` + агрегаты всех профилей.
+   записей **без рефетча** и рассылает `counters:counts` + агрегаты всех профилей;
+   записи кэша, написанные до появления `kind`, не классифицируются из storage —
+   при включённом `hideShorts`/`hideLive` они один раз отправляются в очередь на
+   рефетч (`migrating` в ответе).
 3. **Панель.** `config/panel-sections.js`: новая секция «Фильтры» (`sectionFilters`) —
    чекбоксы `filters.hideShorts`, `filters.hideLive` и число `filters.maxAgeDays`
    (0 = выкл, максимум 3650); каждое изменение — `u.save` + `u.notifyWorker()`.
@@ -1175,12 +1180,15 @@ PocketTube) и слева от Like/Dislike на видео; по одной м�
    сбрасываются все каналы этой группы, по общему счётчику в шапке — все видимые каналы
    активного профиля. Используется существующий батч `counters:setVisits` (одна запись
    composition + один emit), локальный перекрас rows/group chips/total выполняется сразу.
-6. **Тесты.** `test/fixture-feed.xml`: записи Shorts (`media:title` = «YouTube Shorts»,
-   `category scheme … video`) и live («Live»). `test/logic.mjs`: парсер — `label`/
-   `duration`/`category`; новая секция filters — off=5, hideShorts=4, +hideLive=3,
-   maxAgeDays=1→0, 0=выкл, возврат=5, пересчёт без рефетча, рассылка counts+aggregate.
-   `test/dom.mjs`: правый клик по группе сбрасывает только её каналы, правый клик по
-   total сбрасывает все видимые каналы. Итог харнесов: `logic.mjs` — 84, `dom.mjs` — 120.
+6. **Тесты.** `test/fixture-feed.xml`: записи Shorts (`link … /shorts/<id>`) и live
+   (`link … /live/<id>`), остальные — `watch?v=`. `test/logic.mjs`: парсер — `kind`/
+   `label`/`duration`/`category` и регресс «заголовок со словами Shorts/Live остаётся
+   `video`»; секция filters — off=5, hideShorts=4, +hideLive=3, maxAgeDays=1→0, 0=выкл,
+   возврат=5, пересчёт без рефетча, рассылка counts+aggregate; секция kind filters —
+   реальный формат фида (три ссылки), off=3 → hideShorts=2 → +hideLive=1 → off=3 и
+   миграция кэша без `kind` (refetch + переклассификация). `test/dom.mjs`: правый клик
+   по группе сбрасывает только её каналы, правый клик по total сбрасывает все видимые
+   каналы. Итог харнесов: `logic.mjs` — 97, `dom.mjs` — 163.
 
 ### Этап 11 — аватары групп: встроенные иконки и URL (2026-11-12)
 
@@ -1364,6 +1372,7 @@ colorpicker сразу, без повторного выбора уже пока
 
 | Дата | Изменение |
 |---|---|
+| 2026-11-13 | Фикс Этапа 10 из браузерной эксплуатации: `hideShorts` не работал — свежий Short считался новым видео, а `hideLive` скрывал видео с «Live» в заголовке. Реальный RSS не помечает Shorts/трансляции в `media:title` (там заголовок видео): тип записи задаёт `link rel="alternate"` — `youtube.com/shorts/<id>` и `youtube.com/live/<id>`, обычные видео — `watch?v=`. Парсер отдаёт `kind`, `entryVisible()` фильтрует по `kind`, подстрока по `label` убрана. Кэш, написанный до появления `kind`, при включённом `hideShorts`/`hideLive` один раз уходит на рефетч (`migrating` в ответе `counters:settings`). Харнесы: `logic.mjs` 87→97 (kind в парсере, секция kind filters, миграция кэша), фикстура — реальные ссылки. §11, §16. |
 | 2026-11-13 | Фикс Этапа 3 (счётчики): счётчики виджета не обновлялись во время считывания RSS — число появлялось только после F5. Шина SW→вкладки работала на `chrome.alarms` (`yga:emit-flush`, `delayInMinutes: 1.1`), поэтому `counters:counts` доходили до вкладок ~минуту после чтения очереди, а `refreshChannels` вообще ждал всю очередь перед агрегатом. Заменено на дебаунс-таймер (`EMIT_FLUSH_MS = 350` — чуть больше `REQUEST_GAP_MS`, чтобы соседние записи объединялись в одно сообщение); `refreshChannels` и обработчики `init/settings/setVisit/setVisits` сбрасывают очередь сразу по завершении. `counters.js`: перерисовка leading+trailing (200 мс), спиннер кнопки «↻» отражает очередь воркера, а не дедлайн отрисовки. Регресс-проверка `logic.mjs` 84→87 (`counts arrive before the refresh resolves`). §10, §11. |
 | 2026-11-12 | В документацию добавлено, что внешние иконки для аватаров групп можно искать на `https://icons8.com/` и устанавливать через вкладку «URL» прямой ссылкой вида `https://img.icons8.com/?size=48&id=HqsZDKt3q3UW&format=png&color=000000`. §11, README. |
 | 2026-11-12 | Исправлено поведение кнопки «Установить» в попапе аватара: она больше не требует повторно двигать colorpicker, если цвет уже показан в поле, и сохраняет текущее значение colorpicker для выбранной встроенной иконки сразу. Добавлены проверки `dom.mjs`. Харнесы: `logic.mjs` 84, `dom.mjs` 163. §11, §16. |

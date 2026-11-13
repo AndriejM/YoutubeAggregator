@@ -75,14 +75,16 @@ function filtersCfg(settings) {
   };
 }
 
-// Shorts: the media:title label is "YouTube Shorts" (category stays "video").
-// Live: label "Live" — YouTube also labels upcoming/premiere streams, so
-// those are hidden together with live.
+// Shorts and live streams are marked by the entry's alternate link
+// (youtube.com/shorts/<id>, youtube.com/live/<id>); media:title is the video
+// title, so matching the label missed every real Short and hid videos titled
+// «…Live…». Records cached before `kind` existed stay unclassified until the
+// next fetch (counters:settings refetches them).
 function entryVisible(e, filters, at) {
   if (!e || !e.publishedAt) return false;
-  const label = String(e.label || "").toLowerCase();
-  if (filters.hideShorts && label.indexOf("shorts") >= 0) return false;
-  if (filters.hideLive && label.indexOf("live") >= 0) return false;
+  const kind = String(e.kind || "video");
+  if (filters.hideShorts && kind === "shorts") return false;
+  if (filters.hideLive && kind === "live") return false;
   if (filters.maxAgeDays && at - e.publishedAt > filters.maxAgeDays * DAY_MS) return false;
   return true;
 }
@@ -613,12 +615,31 @@ function handleCounters(msg) {
       return (async () => {
         await syncAlarm();
         await recomputeAllCounts();
+        // Entries cached before `kind` existed cannot be classified from
+        // storage, so a Shorts/live edit must refetch them — otherwise the
+        // counter keeps counting Shorts until the next refresh.
+        const settings = await getSettings();
+        const filters = filtersCfg(settings);
+        let migrating = 0;
+        if (filters.hideShorts || filters.hideLive) {
+          const index = await chrome.storage.local.get(VIDEOS_INDEX);
+          const records = await loadVideoRecords(Object.keys(index[VIDEOS_INDEX] || {}));
+          const unclassified = [];
+          for (const [id, rec] of records) {
+            const entries = rec.entries || [];
+            if (entries.length && entries.every((e) => !e.kind)) unclassified.push(id);
+          }
+          if (unclassified.length) {
+            enqueue(unclassified, { force: true, priority: 1 });
+            migrating = unclassified.length;
+          }
+        }
         const stored = await chrome.storage.local.get("yga:profiles");
         for (const profileId of Object.keys(stored["yga:profiles"] || {})) {
           await emitProfileCounts(profileId, true);
         }
         await flushEmitQueue();
-        return { ok: true };
+        return { ok: true, migrating: migrating };
       })();
 
     default:

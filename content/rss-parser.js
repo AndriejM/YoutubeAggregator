@@ -70,8 +70,8 @@
   // `<media:group>` block → { thumbnail, community, label, duration }:
   // media:thumbnail with height=1 (feed order: [0] = channel avatar,
   // [1] = video thumb), media:community statistics views/ratings and the
-  // stage-10 filter fields: media:title label ("YouTube Shorts" / "Live")
-  // and media:duration seconds.
+  // stage-10 filter fields: media:title label (the video title — the filter
+  // kind comes from kindOf(), not from this text) and media:duration seconds.
   function mediaGroup(block, lower) {
     const open = lower.indexOf("<media:group");
     if (open < 0) return {};
@@ -117,6 +117,18 @@
     return out;
   }
 
+  // Entry kind comes from the entry's alternate link: youtube.com/shorts/<id>
+  // and youtube.com/live/<id>; plain videos use /watch?v=<id>. Real feeds put the
+  // video title in media:title (no «YouTube Shorts»/«Live» marker there), so the
+  // URL path is the only structural signal for the stage-10 filters.
+  function kindOf(block) {
+    const tag = /<link[^>]*rel="alternate"[^>]*>/i.exec(block);
+    const href = tag && /href="([^"]*)"/i.exec(tag[0]);
+    if (!href) return "video";
+    const kind = /youtube\.com\/(shorts|live)\/[A-Za-z0-9_-]+/i.exec(href[1]);
+    return kind ? kind[1].toLowerCase() : "video";
+  }
+
   function entryFrom(block) {
     const lower = block.toLowerCase();
     const videoId = innerText(block, lower, "yt:videoId", 0);
@@ -135,6 +147,7 @@
       thumbnail: media.thumbnail || "",
       views: media.community ? media.community.views : 0,
       label: media.label || "",
+      kind: kindOf(block),
       duration: media.duration || 0,
       category: categoryValue,
       watched: false
