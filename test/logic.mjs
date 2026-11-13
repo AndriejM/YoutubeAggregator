@@ -330,6 +330,76 @@ const chains = []; // async sections; the report waits for all of them
     .catch((e) => failures.push("progressive bus section crashed: " + e)));
 }
 
+// --- 2c. worker: dead channels (blocked / deleted on YouTube) --------------
+// Browser report 2026-11-13: after the PocketTube import, blocked channels hung
+// around as subscribed. Five consecutive feed failures drop the channel from its
+// group and exclude it from every profile that holds it (§5, §18.1).
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+
+  chains.push(env.sandbox.chrome.storage.local.set({
+    "yga:profiles": {
+      p_1: { id: "p_1", builtin: true, includeAllSubs: true },
+      p_2: { id: "p_2", includeAllSubs: false },
+      // No composition record at all: the catalog is held implicitly (§5).
+      p_3: { id: "p_3", includeAllSubs: true }
+    },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One" }],
+    "yga:groups": [{ id: "g_1", name: "G", profileId: "p_1", order: 0, collapsed: false }],
+    "yga:profile-channels:p_1": { [CH1]: { addedAt: 1, lastVisitAt: 0, groupId: "g_1" } },
+    "yga:profile-channels:p_2": { [CH1]: { addedAt: 1, lastVisitAt: 0, groupId: "g_2" } },
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+  }).then(async () => {
+    env.setResponder(() => ({ status: 404, body: "gone", etag: null }));
+    for (let i = 1; i <= 3; i++) {
+      await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
+      await flush();
+      const rec = env.storage.get("yga:videos:" + CH1);
+      const comp = env.storage.get("yga:profile-channels:p_1");
+      check(`dead: streak grows to ${i}`, rec.errorStreak === i, JSON.stringify(rec && rec.errorStreak));
+      check(`dead: still in the group after ${i}`, comp[CH1].groupId === "g_1" && !comp[CH1].excluded, JSON.stringify(comp[CH1]));
+    }
+
+    // One success resets the streak — a transient failure must not bury a live channel.
+    env.setResponder(() => ({ status: 200, body: fixture, etag: "etag-alive" }));
+    const alive = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
+    await flush();
+    const recAlive = env.storage.get("yga:videos:" + CH1);
+    check("dead: success resets the streak", alive && alive.ok && recAlive.errorStreak === 0, JSON.stringify(recAlive && recAlive.errorStreak));
+    check("dead: live channel keeps its group", env.storage.get("yga:profile-channels:p_1")[CH1].groupId === "g_1");
+
+    // An includeAllSubs profile with no record still holds the channel.
+    const implicit = await env.send({ type: "counters:refresh", profileId: "p_3", force: true });
+    check("dead: implicit catalog profile holds the channel", implicit && implicit.ok && implicit.requested === 1, JSON.stringify(implicit));
+
+    env.setResponder(() => ({ status: 404, body: "gone", etag: null }));
+    let res = null;
+    for (let i = 1; i <= 5; i++) {
+      res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
+      await flush();
+    }
+    const deadRec = env.storage.get("yga:videos:" + CH1);
+    const comp1 = env.storage.get("yga:profile-channels:p_1");
+    const comp2 = env.storage.get("yga:profile-channels:p_2");
+    check("dead: fifth failure marks the channel dead", res && res.dead === 1 && deadRec.errorStreak === 5, JSON.stringify({ dead: res && res.dead, streak: deadRec.errorStreak }));
+    check("dead: channel leaves the group and the profile", comp1[CH1].groupId === null && comp1[CH1].excluded === true, JSON.stringify(comp1[CH1]));
+    check("dead: other profiles lose it too", comp2[CH1].groupId === null && comp2[CH1].excluded === true, JSON.stringify(comp2[CH1]));
+
+    const comp3 = env.storage.get("yga:profile-channels:p_3") || {};
+    check("dead: implicit profile gets an excluded record", comp3[CH1] && comp3[CH1].excluded === true, JSON.stringify(comp3));
+    const after = await env.send({ type: "counters:refresh", profileId: "p_3", force: true });
+    check("dead: implicit profile stops fetching it", after && after.ok && after.requested === 0, JSON.stringify(after));
+
+    const counts = await env.send({ type: "counters:get", profileId: "p_1", channelIds: [CH1] });
+    check("dead: excluded channel is not counted", counts.aggregate && counts.aggregate.newCount === 0, JSON.stringify(counts.aggregate));
+    check("dead: error state stays honest", counts.channelCounts[CH1].error > 0 && counts.channelCounts[CH1].streak === 5, JSON.stringify(counts.channelCounts[CH1]));
+  })
+    .catch((e) => failures.push("dead channel section crashed: " + e)));
+}
+
 // --- 3. worker: stage-10 filters (Shorts / live / maxAgeDays) -------------
 // Filter edits must repaint counts from the cached entries — no refetch —
 // and push both per-channel counts and per-profile aggregates to the tabs.

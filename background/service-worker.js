@@ -22,6 +22,10 @@ const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 1; // 429/5xx/network: one retry after backoff
 const STALE_MS = 24 * 60 * 60 * 1000; // "stale" marker threshold (PLAN.md §10)
 const MAX_ENTRIES_KEPT = 20; // RSS ships ~15 (PLAN.md §6); watched flags need headroom
+// A channel whose feed fails this many times in a row is blocked or deleted on
+// YouTube (user report 2026-11-13: blocked channels stayed listed as subscribed
+// after the PocketTube import). It leaves its group and the profile (§5).
+const DEAD_AFTER_ERRORS = 5;
 
 // Freshness floor if yga:settings is missing or unreadable.
 const DEFAULT_MIN_INTERVAL_MS = 90000;
@@ -178,6 +182,7 @@ function countValue(record, filters, at) {
     newCount: computeCounts(record, filters, at),
     fetchedAt: (record && record.fetchedAt) || 0,
     error: (record && record.error) || 0,
+    streak: (record && record.errorStreak) || 0,
     at: unwatchedAt(record, filters, at)
   };
 }
@@ -232,6 +237,39 @@ async function bumpVideosIndex(ids) {
   const payload = {};
   payload[VIDEOS_INDEX] = index;
   await chrome.storage.local.set(payload);
+}
+
+// A channel whose feed keeps failing is blocked or deleted on YouTube: it leaves
+// its group (§18.1) and is excluded from every profile that holds it (§5).
+// `excluded` is the user-choice flag that syncProfile never resets, so a channel
+// YouTube still lists in the catalog does not come back on the next catalog read
+// — the panel's restore button (addChannel) is the only way back.
+async function markDead(channelId) {
+  const stored = await chrome.storage.local.get("yga:profiles");
+  const profiles = stored["yga:profiles"] || {};
+  const touched = [];
+  for (const profileId of Object.keys(profiles)) {
+    const key = "yga:profile-channels:" + profileId;
+    const compStore = await chrome.storage.local.get(key);
+    const comp = compStore[key] || {};
+    const rec = comp[channelId];
+    if (!rec) {
+      // An includeAllSubs profile holds the catalog implicitly, so a channel
+      // with no record is still a member: the dead flag needs a record of its own.
+      if (!profiles[profileId].includeAllSubs) continue;
+      comp[channelId] = { addedAt: now(), lastVisitAt: now(), groupId: null, excluded: true };
+    } else {
+      if (rec.excluded && !rec.groupId) continue;
+      rec.groupId = null;
+      rec.excluded = true;
+      rec.lastVisitAt = now();
+    }
+    const payload = {};
+    payload[key] = comp;
+    await chrome.storage.local.set(payload);
+    touched.push(profileId);
+  }
+  return touched;
 }
 
 // Profile-scoped aggregate → tabs bus so other tabs learn about resets
@@ -376,6 +414,7 @@ async function fetchOne(channelId, force) {
     if (response.status === 304 && prev) {
       prev.fetchedAt = now();
       prev.error = 0;
+      prev.errorStreak = 0;
       await writeRecord(channelId, prev);
       return { ok: true, notModified: true };
     }
@@ -399,7 +438,8 @@ async function fetchOne(channelId, force) {
       etag: response.headers.get("ETag") || (prev && prev.etag) || "",
       title: feed.title || (prev && prev.title) || "",
       channelId: feed.channelId || channelId,
-      error: 0
+      error: 0,
+      errorStreak: 0
     });
     return { ok: true };
   }
@@ -408,8 +448,12 @@ async function fetchOne(channelId, force) {
   const record = prev || { entries: [], fetchedAt: 0, etag: "", title: "", channelId: channelId };
   record.fetchedAt = now();
   record.error = now();
+  // Consecutive failures, not a total: one network hiccup in a long streak must
+  // not bury a live channel (PLAN.md §10).
+  record.errorStreak = ((prev && prev.errorStreak) || 0) + 1;
   await writeRecord(channelId, record);
-  return { error: lastError };
+  const profiles = record.errorStreak >= DEAD_AFTER_ERRORS ? await markDead(channelId) : [];
+  return { error: lastError, dead: profiles.length > 0, profiles: profiles };
 }
 
 async function pump() {
@@ -468,20 +512,34 @@ async function refreshChannels(profileId, channelIds, opts) {
   const enq = enqueue(channelIds, opts);
   while (enq.jobs.length < enq.expected) await new Promise((r) => setTimeout(r, 100));
   let errors = 0;
-  for (const j of enq.jobs) if (j.result && j.result.error) errors++;
+  let dead = 0;
+  const deadProfiles = new Set();
+  for (const j of enq.jobs) {
+    if (j.result && j.result.error) errors++;
+    if (j.result && j.result.dead) {
+      dead++;
+      for (const pid of j.result.profiles || []) deadProfiles.add(pid);
+    }
+  }
   // Per-channel counts travelled through the bus while the pump was draining;
   // deliver the window still pending before the aggregate so the tabs never
   // wait for the whole refresh to finish.
   await flushEmitQueue();
   const agg = profileId ? await emitProfileCounts(profileId) : null;
+  // A dead channel left its group in every profile that held it, so those
+  // totals changed too and their tabs must re-derive them.
+  for (const pid of deadProfiles) {
+    if (pid !== profileId) await emitProfileCounts(pid, true);
+  }
   await flushEmitQueue();
   lastRun = {
     at: started,
     mode: opts.scheduled ? "scheduled" : "onOpen",
     requested: enq.expected,
-    errors: errors
+    errors: errors,
+    dead: dead
   };
-  return { requested: enq.expected, queued: channelIds.length - enq.expected, errors: errors, lastRun: lastRun, aggregate: agg, aggregateSeq: aggregateSeq };
+  return { requested: enq.expected, queued: channelIds.length - enq.expected, errors: errors, dead: dead, lastRun: lastRun, aggregate: agg, aggregateSeq: aggregateSeq };
 }
 
 // ---- scheduled mode (PLAN.md §10; the on/off switch is stage 4) ----

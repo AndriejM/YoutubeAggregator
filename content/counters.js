@@ -11,6 +11,14 @@ window.yga = window.yga || {};
   const RERENDER_MS = 200; // coalesce bus windows into one repaint
   let rerenderTimer = 0;
 
+  // Membership signature of a rendered list: ids plus their group. A count-only
+  // patch (§10.7) cannot remove a row, so a channel that left the profile — a
+  // dead channel excluded by the worker — needs a real re-render.
+  function membershipSig(list) {
+    if (!list) return "";
+    return list.map((s) => s.channelId + ":" + (s.groupId || "")).sort().join("|");
+  }
+
   // Per-profile view of the worker's shared cache (PLAN.md §10.4): how many
   // unwatched entries were published after this profile's lastVisitAt.
   // `at` is the newest-first timestamp array the worker ships per channel.
@@ -173,7 +181,13 @@ window.yga = window.yga || {};
       const paint = () => {
         if (!widget.isConnected) return;
         yga.state.getVisibleSubs().then((list) => {
-          if (widget.isConnected) yga.widget.applyCounts(list);
+          if (!widget.isConnected) return;
+          const sig = membershipSig(list);
+          if (sig !== membershipSig(yga.widget.lastRendered && yga.widget.lastRendered())) {
+            yga.widget.render(list);
+          } else {
+            if (yga.widget.applyCounts) yga.widget.applyCounts(list);
+          }
           updateTotal(widget);
         });
       };
