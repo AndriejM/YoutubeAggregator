@@ -13,9 +13,11 @@ const VIDEOS_INDEX = "yga:videos-index";
 const ACCOUNT_KEY = "yga:account";
 const SETTINGS_KEY = "yga:settings";
 const ALARM_NAME = "yga:scheduled-refresh";
-const EMIT_ALARM = "yga:emit-flush";
 const MIN_ALARM_MINUTES = 60; // PLAN.md §10: scheduled period floor
 const REQUEST_GAP_MS = 300; // 200–400 ms pause between fetches (PLAN.md §10.2)
+// Bus window: slightly above REQUEST_GAP_MS so consecutive writes coalesce
+// into one message while the pump still paints every few hundred ms.
+const EMIT_FLUSH_MS = 350;
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 1; // 429/5xx/network: one retry after backoff
 const STALE_MS = 24 * 60 * 60 * 1000; // "stale" marker threshold (PLAN.md §10)
@@ -30,7 +32,8 @@ let queue = []; // { channelId, force, priority, seq, done }
 let pumpRunning = false;
 const countCache = new Map(); // channelId -> { newCount, fetchedAt, error }
 const profileCounts = new Map(); // profileId -> { newCount, errorCount, stale, at }
-let emitQueue = []; // pending bus messages, one alarm each (SW→tabs)
+let emitQueue = []; // pending bus messages, coalesced by one timer (SW→tabs)
+let emitTimer = 0; // pending flush window
 let aggregateSeq = 0; // SW-lifetime freshness tag for counters:aggregate
 let lastRun = null; // { at, mode, requested, errors }
 
@@ -214,7 +217,7 @@ async function recomputeAllCounts() {
     countCache.set(id, value);
     counts[id] = value;
   }
-  await emitToAlarms({ type: "counters:counts", counts: counts });
+  await emitToTabs({ type: "counters:counts", counts: counts });
   return counts;
 }
 
@@ -229,8 +232,8 @@ async function bumpVideosIndex(ids) {
   await chrome.storage.local.set(payload);
 }
 
-// Profile-scoped aggregate → alarms bus so other tabs learn about resets
-// without a full refresh (alarms do not fire in the sending context).
+// Profile-scoped aggregate → tabs bus so other tabs learn about resets
+// without a full refresh.
 // The number is lastVisitAt-aware (per-profile composition), so it matches the
 // sum of the row counters a tab renders; force=true still emits so a visit
 // reset travels even when the total happens to be unchanged.
@@ -255,7 +258,7 @@ async function emitProfileCounts(profileId, force) {
   if (!force && prev && prev.newCount === newCount && prev.errorCount === errorCount && prev.stale === stale) return;
   profileCounts.set(profileId, { newCount: newCount, errorCount: errorCount, stale: stale, at: now() });
   const agg = { profileId: profileId, newCount: newCount, errorCount: errorCount, stale: stale };
-  await emitToAlarms({
+  await emitToTabs({
     type: "counters:aggregate",
     profileId: profileId,
     newCount: newCount,
@@ -266,23 +269,30 @@ async function emitProfileCounts(profileId, force) {
   return agg;
 }
 
-// Bus: one shared flush alarm instead of one per message — with 1000+ channels
-// the per-write emits used to outrun Chrome's per-extension alarm quota and
-// silently starve the tabs (counters stuck at 0 despite fresh storage).
-async function flushEmitAlarm() {
-  try {
-    await chrome.alarms.create(EMIT_ALARM, { delayInMinutes: 1.1 });
-  } catch (e) {
-    console.debug("[yga] emit alarm failed:", e);
-  }
+// Bus: one debounced flush window instead of one message per write — with
+// 1000+ channels the per-write emits used to outrun Chrome's per-extension
+// alarm quota and silently starve the tabs (counters stuck at 0 despite fresh
+// storage). The alarm bus delivered ~1 min after the fetches, so counters
+// stayed empty while the pump was still reading RSS; a timer drains the queue
+// in sync with the refresh (the SW stays awake while fetches are in flight).
+function scheduleEmitFlush() {
+  if (emitTimer) return;
+  emitTimer = setTimeout(() => {
+    emitTimer = 0;
+    flushEmitQueue().catch((e) => console.debug("[yga] emit flush failed:", e));
+  }, EMIT_FLUSH_MS);
 }
 
-async function emitToAlarms(message) {
+async function emitToTabs(message) {
   emitQueue.push(message);
-  await flushEmitAlarm();
+  scheduleEmitFlush();
 }
 
 async function flushEmitQueue() {
+  if (emitTimer) {
+    clearTimeout(emitTimer);
+    emitTimer = 0;
+  }
   while (emitQueue.length) {
     const batch = emitQueue.splice(0, emitQueue.length);
     const merged = {};
@@ -332,7 +342,7 @@ async function writeRecord(channelId, record) {
   const prev = countCache.get(channelId);
   countCache.set(channelId, value);
   const changed = !prev || !sameCountValue(prev, value);
-  if (changed) await emitToAlarms({ type: "counters:counts", counts: { [channelId]: value } });
+  if (changed) await emitToTabs({ type: "counters:counts", counts: { [channelId]: value } });
 }
 
 async function fetchOne(channelId, force) {
@@ -457,7 +467,12 @@ async function refreshChannels(profileId, channelIds, opts) {
   while (enq.jobs.length < enq.expected) await new Promise((r) => setTimeout(r, 100));
   let errors = 0;
   for (const j of enq.jobs) if (j.result && j.result.error) errors++;
+  // Per-channel counts travelled through the bus while the pump was draining;
+  // deliver the window still pending before the aggregate so the tabs never
+  // wait for the whole refresh to finish.
+  await flushEmitQueue();
   const agg = profileId ? await emitProfileCounts(profileId) : null;
+  await flushEmitQueue();
   lastRun = {
     at: started,
     mode: opts.scheduled ? "scheduled" : "onOpen",
@@ -528,12 +543,13 @@ function handleCounters(msg) {
         payload[key] = comp;
         await chrome.storage.local.set(payload);
         await emitProfileCounts(profileId, true);
+        await flushEmitQueue();
         return { ok: true, lastVisitAt: rec.lastVisitAt };
       })();
 
     // Bulk reset (config panel §9.2.1 "mark watched" on many channels): one
     // composition write and one aggregate emit for the whole batch, otherwise
-    // a 200-channel selection floods the alarms bus.
+    // a 200-channel selection floods the bus.
     case "counters:setVisits":
       return (async () => {
         const { profileId, channelIds } = msg;
@@ -554,6 +570,7 @@ function handleCounters(msg) {
         payload[key] = comp;
         await chrome.storage.local.set(payload);
         await emitProfileCounts(profileId, true);
+        await flushEmitQueue();
         return { ok: true, lastVisitAt: stamp, updated: channelIds.length };
       })();
 
@@ -585,6 +602,7 @@ function handleCounters(msg) {
         await syncAlarm();
         const pid = msg.profileId || "p_1";
         const aggregate = await emitProfileCounts(pid, true);
+        await flushEmitQueue();
         return { ok: true, counts: counts, aggregate: aggregate, aggregateSeq: aggregateSeq };
       })();
 
@@ -599,6 +617,7 @@ function handleCounters(msg) {
         for (const profileId of Object.keys(stored["yga:profiles"] || {})) {
           await emitProfileCounts(profileId, true);
         }
+        await flushEmitQueue();
         return { ok: true };
       })();
 
@@ -619,10 +638,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (!alarm || !alarm.name) return;
   if (alarm.name === ALARM_NAME) {
     scheduledRun().catch((e) => console.debug("[yga] scheduled run failed:", e));
-    return;
-  }
-  if (alarm.name === EMIT_ALARM) {
-    flushEmitQueue().catch((e) => console.debug("[yga] emit flush failed:", e));
   }
 });
 

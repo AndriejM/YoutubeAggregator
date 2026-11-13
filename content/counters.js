@@ -8,6 +8,8 @@ window.yga = window.yga || {};
   // states. Row counters live in .yga-count (widget.js); this module owns .yga-total.
   let unsubCounter = null;
   let unsubComp = null;
+  const RERENDER_MS = 200; // coalesce bus windows into one repaint
+  let rerenderTimer = 0;
 
   // Per-profile view of the worker's shared cache (PLAN.md §10.4): how many
   // unwatched entries were published after this profile's lastVisitAt.
@@ -146,15 +148,17 @@ window.yga = window.yga || {};
         total.textContent = "…";
         total.classList.remove("yga-hidden");
       }
-      await yga.state.refreshCounters({ force: true });
-      // Worker messages arrive asynchronously; drop the spinner when the
-      // queue has been accepted (results keep flowing in via the bus).
-      setTimeout(() => {
+      // The worker pushes per-channel counts as its queue drains, so rows and
+      // the chip repaint during the refresh; the spinner only says the queue
+      // is still running, it is not a paint deadline.
+      try {
+        await yga.state.refreshCounters({ force: true });
+      } finally {
         if (!widget.isConnected) return;
         btn.classList.remove("yga-busy");
         btn.disabled = false;
         updateTotal(widget);
-      }, 1200);
+      }
     },
 
     // Wire once per mounted widget; unsubscribe on remount (one live listener).
@@ -162,12 +166,28 @@ window.yga = window.yga || {};
       yga.counters.ensureToolbar(widget);
       if (unsubCounter) unsubCounter();
       if (unsubComp) unsubComp();
-      const rerender = () => {
+      if (rerenderTimer) {
+        clearTimeout(rerenderTimer);
+        rerenderTimer = 0;
+      }
+      const paint = () => {
         if (!widget.isConnected) return;
         yga.state.getVisibleSubs().then((list) => {
           if (widget.isConnected) yga.widget.applyCounts(list);
           updateTotal(widget);
         });
+      };
+      // Leading edge paints the first change of a bus window immediately, the
+      // trailing edge catches the rest of it — counters track the RSS reads
+      // instead of waiting for the whole refresh.
+      const rerender = () => {
+        if (!widget.isConnected) return;
+        paint();
+        if (rerenderTimer) return;
+        rerenderTimer = setTimeout(() => {
+          rerenderTimer = 0;
+          paint();
+        }, RERENDER_MS);
       };
       unsubCounter = yga.state.onCountersChanged(rerender);
       unsubComp = yga.state.onCompositionChanged(rerender);

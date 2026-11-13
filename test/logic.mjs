@@ -135,7 +135,7 @@ const chains = []; // async sections; the report waits for all of them
     check("worker: 429 keeps old counts", counts.channelCounts[CH1].newCount === 5 && counts.channelCounts[CH1].total === 5);
 
     // dedup inside one request; CH2's watched flag makes both writes
-    // "changed" so they must coalesce into one merged bus message
+    // "changed" so both must reach the tabs
     const recB = clone(env.storage.get("yga:videos:" + CH2));
     recB.entries[0].watched = true;
     recB.entries[0].watchedAt = Date.now();
@@ -144,16 +144,17 @@ const chains = []; // async sections; the report waits for all of them
     const busDedup = env.bus.length;
     res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1, CH1, CH2] });
     check("worker: duplicate ids deduped", res && res.requested === 2, JSON.stringify(res));
-    // the single flush alarm must deliver both channels within one window
-    let batched = [];
-    for (let i = 0; i < 45 && !batched.some((m) => m.counts[CH1] && m.counts[CH2]); i++) {
+    // progressive delivery: every channel's count reaches the tabs while the
+    // queue drains, merged per flush window when writes land together
+    let arrived = [];
+    for (let i = 0; i < 45 && !(arrived.some((m) => m.counts[CH1]) && arrived.some((m) => m.counts[CH2])); i++) {
       await new Promise((r) => setTimeout(r, 100));
-      batched = env.bus.slice(busDedup).filter((m) => m.type === "counters:counts");
+      arrived = env.bus.slice(busDedup).filter((m) => m.type === "counters:counts");
     }
     check(
-      "worker: batched flush merges channels",
-      batched.length >= 1 && batched.some((m) => m.counts[CH1] && m.counts[CH2]),
-      JSON.stringify(batched.map((m) => Object.keys(m.counts)))
+      "worker: per-channel counts reach the tabs during the refresh",
+      arrived.length >= 1 && arrived.some((m) => m.counts[CH1]) && arrived.some((m) => m.counts[CH2]),
+      JSON.stringify(arrived.map((m) => Object.keys(m.counts)))
     );
 
     // watched merge: mark entry watched via storage, re-fetch, flag survives
@@ -270,6 +271,43 @@ const chains = []; // async sections; the report waits for all of them
     check("newSince: future visit zeroes", ns([5, 4, 3], 9) === 0);
   })
     .catch((e) => failures.push("worker section crashed: " + e)));
+}
+
+// --- 2b. worker: progressive bus delivery ---------------------------------
+// The counters must reach the tabs while the queue is still draining, not
+// after the whole refresh (the old alarm bus delivered ~1 min later, so the
+// widget stayed empty until a page reload).
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+
+  chains.push(env.sandbox.chrome.storage.local.set({
+    "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One" }, { c: CH2, t: "Two" }],
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+  }).then(async () => {
+    env.setResponder(() => new Promise((r) => setTimeout(() => r({ status: 200, body: fixture, etag: "etag-prog" }), 120)));
+    const refresh = env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1, CH2] });
+    await new Promise((r) => setTimeout(r, 180)); // CH1 done, CH2 still fetching
+    const early = env.bus.filter((m) => m.type === "counters:counts");
+    check(
+      "bus: counts arrive before the refresh resolves",
+      early.some((m) => m.counts[CH1]) && !env.bus.some((m) => m.type === "counters:aggregate"),
+      JSON.stringify(env.bus.map((m) => m.type))
+    );
+    const res = await refresh;
+    check("bus: refresh still reports both channels", res && res.ok && res.requested === 2, JSON.stringify(res));
+    await flush();
+    const all = env.bus.filter((m) => m.type === "counters:counts");
+    check(
+      "bus: every channel delivered",
+      all.some((m) => m.counts[CH1]) && all.some((m) => m.counts[CH2]),
+      JSON.stringify(all.map((m) => Object.keys(m.counts)))
+    );
+  })
+    .catch((e) => failures.push("progressive bus section crashed: " + e)));
 }
 
 // --- 3. worker: stage-10 filters (Shorts / live / maxAgeDays) -------------

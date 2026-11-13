@@ -64,7 +64,9 @@ content/counters.js      counter view: newSince(at, lastVisitAt), header total c
 content/group-picker.js  «Group» button on channel pages (§8.8)
 content/rss-parser.js    tag-scanner XML parser (MV3 service workers have no DOMParser)
 background/service-worker.js  RSS fetch queue: dedup, batch of 12, throttle, ETag/304,
-                         retries, cache yga:videos:<id>, scheduled refresh (alarms)
+                         retries, cache yga:videos:<id>, scheduled refresh (alarms);
+                         pushes counters to tabs on a ~350 ms window, so counts
+                         repaint while the queue is still draining
 config/panel.js          inline config panel in #content (tabs + internal scroll)
 config/panel-sections.js seven panel tabs
 ```

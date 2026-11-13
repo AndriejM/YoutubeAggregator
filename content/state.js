@@ -52,7 +52,7 @@ window.yga = window.yga || {};
     }
   });
 
-  // Worker → tabs bus (chrome.alarms-driven; see service-worker.js).
+  // Worker → tabs bus (debounced runtime messages; see service-worker.js).
   try {
     chrome.runtime.onMessage.addListener((msg) => {
       if (!msg || typeof msg.type !== "string") return;
@@ -294,7 +294,7 @@ window.yga = window.yga || {};
     // ---- counters (stage 3) ----
 
     // Direct snapshot from counters:init — the tab paints without waiting for
-    // the worker→tabs alarm bus.
+    // the worker→tabs bus.
     applyInitSnapshot(countsMap, agg, seq) {
       const fresh = countsMap || {};
       let changed = false;
