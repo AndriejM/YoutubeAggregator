@@ -562,5 +562,25 @@
   "dataResetConfirm": {
     "message": "Delete all profiles, groups, settings and caches? YouTube subscriptions are not affected.",
     "description": "Confirmation before wiping extension data"
+  },
+  "dataImportPocketTube": {
+    "message": "Import PocketTube groups",
+    "description": "Button that reads a PocketTube export and assigns its groups to channels"
+  },
+  "dataImportPocketTubeProfile": {
+    "message": "Target profile",
+    "description": "Label of the profile selector next to the PocketTube import button"
+  },
+  "dataImportPocketTubeConfirm": {
+    "message": "Import {groups} PocketTube groups into the “{profile}” profile and assign {channels} channels to them? {missing} channels are not subscribed and will be skipped.",
+    "description": "Confirmation before applying a PocketTube group import"
+  },
+  "dataImportPocketTubeDone": {
+    "message": "“{profile}”: {groups} groups, {channels} channels assigned, {missing} skipped",
+    "description": "Status after a PocketTube group import"
+  },
+  "dataImportPocketTubeFailed": {
+    "message": "Not a PocketTube export",
+    "description": "Status when the picked file carries no PocketTube groups"
   }
 }

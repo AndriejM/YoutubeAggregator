@@ -31,7 +31,8 @@ research is kept under `examples/` and is not part of the shipped extension.
   before the kind field existed are refetched once).
 - **Inline configuration panel** — opens in YouTube's main content area (no iframe, no
   extra tab): profiles, groups, channels, counters, filters, widget, theme, data
-  (export/import/reset).
+  (export/import/reset, plus a PocketTube group importer that reads a JSON export and
+  assigns its groups to the channels of a profile picked next to the button).
   Channel rows include an open-in-new-tab link (↗).
 - **Group button on channel pages** — assign the channel to a group of the active profile
   right from the channel header.

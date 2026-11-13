@@ -415,6 +415,10 @@ img.yga-panel-avatar:not([src]) {
   display: none;
 }
 
+.yga-panel-hidden-file {
+  display: none;
+}
+
 /* Single-field modal (§9.2.2): «+ Группа» and rename */
 .yga-panel-modal {
   position: fixed;

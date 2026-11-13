@@ -562,5 +562,25 @@
   "dataResetConfirm": {
     "message": "Удалить все профили, группы, настройки и кэши? Подписки YouTube не пострадают.",
     "description": "Подтверждение перед стиранием данных расширения"
+  },
+  "dataImportPocketTube": {
+    "message": "Импорт групп из PocketTube",
+    "description": "Кнопка: прочитать экспорт PocketTube и назначить его группы каналам"
+  },
+  "dataImportPocketTubeProfile": {
+    "message": "Профиль",
+    "description": "Метка списка профилей рядом с кнопкой импорта PocketTube"
+  },
+  "dataImportPocketTubeConfirm": {
+    "message": "Импортировать {groups} групп PocketTube в профиль «{profile}» и назначить им {channels} каналов? {missing} каналов нет в подписках — они будут пропущены.",
+    "description": "Подтверждение перед применением импорта групп PocketTube"
+  },
+  "dataImportPocketTubeDone": {
+    "message": "«{profile}»: {groups} групп, {channels} каналов назначено, {missing} пропущено",
+    "description": "Статус после импорта групп PocketTube"
+  },
+  "dataImportPocketTubeFailed": {
+    "message": "Это не экспорт PocketTube",
+    "description": "Статус, когда в файле нет групп PocketTube"
   }
 }

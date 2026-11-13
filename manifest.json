@@ -34,6 +34,7 @@
         "content/profiles.js",
         "content/group-icons.js",
         "content/groups.js",
+        "content/pockettube.js",
         "content/api-client.js",
         "content/theme.js",
         "content/widget.js",

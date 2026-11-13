@@ -935,6 +935,75 @@ window.yga = window.yga || {};
       reader.readAsText(picked);
     });
 
+    // PocketTube migration (PLAN.md §20): its export/dump carries
+    // `{ "<group>": ["UC…"] }` plus ysc_meta order. The target profile is picked
+    // here rather than inherited from the widget — groups live inside one
+    // profile (§18.1) — and assignment goes through groups.js and profiles.js
+    // only, so the widget repaints without a reload when the target is active.
+    await yga.profiles.load();
+    const activeId = await yga.profiles.activeProfileId();
+    const ptProfile = u.select(
+      yga.profiles.list().map((p) => ({ value: p.id, text: p.name })),
+      activeId
+    );
+    ptProfile.setAttribute("aria-label", yga.i18n("dataImportPocketTubeProfile"));
+
+    const ptFile = el("input", "yga-panel-file yga-panel-hidden-file", {
+      type: "file",
+      accept: "application/json",
+      "aria-label": yga.i18n("dataImportPocketTube")
+    });
+    ptFile.addEventListener("change", async () => {
+      const picked = ptFile.files && ptFile.files[0];
+      if (!picked) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        let payload = null;
+        try {
+          payload = JSON.parse(String(reader.result));
+        } catch (e) {
+          payload = null;
+        }
+        ptFile.value = "";
+        const target = ptProfile.value;
+        const plan = payload ? await yga.pockettube.plan(payload, target) : null;
+        if (!plan || !plan.ok) {
+          status.textContent = yga.i18n("dataImportPocketTubeFailed");
+          return;
+        }
+        const name = (yga.profiles.get(target) || {}).name || target;
+        const confirmText = yga
+          .i18n("dataImportPocketTubeConfirm")
+          .replace("{profile}", name)
+          .replace("{groups}", String(plan.groups))
+          .replace("{channels}", String(plan.assigned))
+          .replace("{missing}", String(plan.missing));
+        if (!window.confirm(confirmText)) return;
+        const res = await yga.pockettube.apply(plan);
+        if (!res || !res.ok) {
+          status.textContent = yga.i18n("dataImportPocketTubeFailed");
+          return;
+        }
+        // Only the active profile's rows are on screen; a different target
+        // changes storage and shows up when that profile is switched to.
+        if (target === activeId) await yga.state.refreshVisible();
+        status.textContent = yga
+          .i18n("dataImportPocketTubeDone")
+          .replace("{profile}", name)
+          .replace("{groups}", String(res.groups))
+          .replace("{channels}", String(res.assigned))
+          .replace("{missing}", String(res.missing));
+        if (target === activeId) {
+          const section = yga.panel.activeSection();
+          if (section === "groups" || section === "channels") yga.panel.refresh(section);
+        }
+      };
+      reader.readAsText(picked);
+    });
+
+    const ptBtn = u.button("dataImportPocketTube", "yga-panel-icon");
+    ptBtn.addEventListener("click", () => ptFile.click());
+
     const reset = u.button("dataReset", "yga-panel-icon yga-panel-danger");
     reset.addEventListener("click", async () => {
       if (!window.confirm(yga.i18n("dataResetConfirm"))) return;
@@ -946,6 +1015,9 @@ window.yga = window.yga || {};
 
     bar.appendChild(exportBtn);
     bar.appendChild(file);
+    bar.appendChild(ptProfile);
+    bar.appendChild(ptBtn);
+    bar.appendChild(ptFile);
     bar.appendChild(reset);
     bar.appendChild(status);
     host.appendChild(bar);

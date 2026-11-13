@@ -654,6 +654,168 @@ const chains = []; // async sections; the report waits for all of them
     .catch((e) => failures.push("content section crashed: " + e)));
 }
 
+// --- 5. PocketTube group import (content/pockettube.js) --------------------
+// PLAN.md §20: PocketTube stores groups as `{ "<name>": ["UC…"] }` plus
+// ysc_meta order; its export file has the same shape and a chrome.storage dump
+// wraps it as {local, sync}. Only names, order and ids move — watched flags
+// stay behind. Channels absent from the catalog are skipped (§5).
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+  const shared = env.storage;
+
+  const csandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+    Math,
+    JSON,
+    Promise,
+    Object,
+    Array,
+    Map,
+    Set,
+    String,
+    Number,
+    RegExp,
+    Intl,
+    chrome: {
+      storage: {
+        local: {
+          get: async (keys) => {
+            const out = {};
+            const list =
+              keys === undefined ? Array.from(shared.keys())
+              : typeof keys === "string" ? [keys]
+              : Array.isArray(keys) ? keys
+              : Object.keys(keys);
+            for (const k of list) if (shared.has(k)) out[k] = clone(shared.get(k));
+            return out;
+          },
+          set: async (payload) => {
+            for (const k in payload) shared.set(k, clone(payload[k]));
+          },
+          remove: async (key) => {
+            for (const k of typeof key === "string" ? [key] : key) shared.delete(k);
+          }
+        },
+        onChanged: { addListener() {} }
+      },
+      runtime: { onMessage: { addListener() {} }, sendMessage: async () => ({}) },
+      i18n: { getMessage: (k) => k }
+    },
+    yga: { i18n: (k) => k }
+  };
+  csandbox.globalThis = csandbox;
+  csandbox.window = csandbox;
+  vm.createContext(csandbox);
+  vm.runInContext(read("content/state.js"), csandbox, { filename: "state.js" });
+  vm.runInContext(read("content/profiles.js"), csandbox, { filename: "profiles.js" });
+  vm.runInContext(read("content/groups.js"), csandbox, { filename: "groups.js" });
+  vm.runInContext(read("content/pockettube.js"), csandbox, { filename: "pockettube.js" });
+
+  const c = csandbox.yga;
+  const cid = (i) => "UC" + "c" + String(i).padStart(21, "0");
+  const ptPayload = {
+    "Новости": [cid(1), cid(2), cid(9)],
+    "Кино": [cid(3)],
+    "Пустая": [],
+    "ysc_collection": { "Новости": "Новости", "Кино": "Кино", "Пустая": "Пустая" },
+    "ysc_meta": { "Кино": { img: "/icon/a.png", position: 0 }, "Новости": { position: 1 }, "Пустая": { position: 2 } },
+    "ysc_settings": { lang: "ru-RU" }
+  };
+
+  chains.push(env.sandbox.chrome.storage.local
+    .set({
+      "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
+      "yga:account": { accountKey: "UCme" },
+      "yga:subs:UCme": [{ c: cid(1), t: "One" }, { c: cid(2), t: "Two" }, { c: cid(3), t: "Three" }],
+      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    })
+    .then(async () => {
+      await c.profiles.load();
+      const pid = await c.profiles.activeProfileId();
+      await c.state.setAccountKey("UCme");
+
+      const parsed = c.pockettube.parse(ptPayload);
+      check(
+        "pockettube: groups parsed in ysc_meta order",
+        !!parsed && parsed.groups.map((g) => g.name).join(",") === "Кино,Новости,Пустая",
+        JSON.stringify(parsed && parsed.groups.map((g) => [g.name, g.order]))
+      );
+      check(
+        "pockettube: dump wrapper {local, sync} parses the same",
+        JSON.stringify(c.pockettube.parse({ local: { ysc_title_id: {} }, sync: ptPayload })) === JSON.stringify(parsed),
+        "wrapped payload diverged"
+      );
+      check("pockettube: foreign payload rejected", c.pockettube.parse({ ygaExport: 1, "yga:groups": [] }) === null);
+
+      const plan = await c.pockettube.plan(ptPayload, pid);
+      check(
+        "pockettube: plan counts groups and skips unsubscribed",
+        plan && plan.ok && plan.groups === 3 && plan.created === 3 && plan.assigned === 3 && plan.missing === 1,
+        JSON.stringify(plan && { groups: plan.groups, created: plan.created, assigned: plan.assigned, missing: plan.missing })
+      );
+
+      const res = await c.pockettube.apply(plan);
+      check(
+        "pockettube: apply creates groups and assigns channels",
+        res && res.ok && res.created === 3 && res.assigned === 3,
+        JSON.stringify(res)
+      );
+
+      const groups = c.groups.list(pid);
+      const comp = await c.profiles.getComposition(pid);
+      const byName = new Map(groups.map((g) => [g.name, g.id]));
+      check(
+        "pockettube: composition carries groupId",
+        comp[cid(1)].groupId === byName.get("Новости") &&
+          comp[cid(2)].groupId === byName.get("Новости") &&
+          comp[cid(3)].groupId === byName.get("Кино") &&
+          !comp[cid(9)],
+        JSON.stringify({ groups: groups.map((g) => g.name), comp: comp })
+      );
+
+      const list = await c.state.getVisibleSubs();
+      check(
+        "pockettube: widget rows carry the imported group",
+        !!list && list.length === 3 && list.every((s) => !!s.groupId),
+        JSON.stringify(list && list.map((s) => s.groupId))
+      );
+
+      // Re-importing the same file must not duplicate groups or rewrite rows.
+      const again = await c.pockettube.apply(await c.pockettube.plan(ptPayload, pid));
+      check(
+        "pockettube: re-import is idempotent",
+        again && again.ok && again.created === 0 && again.matched === 3 && again.assigned === 0 && c.groups.list(pid).length === 3,
+        JSON.stringify(again)
+      );
+
+      // The panel picks a target profile (§18.1: groups belong to one profile),
+      // so a curated profile gets its own group set and membership.
+      const p2 = await c.profiles.create("Curated");
+      const second = await c.pockettube.apply(await c.pockettube.plan(ptPayload, p2.id));
+      const groups2 = c.groups.list(p2.id);
+      check(
+        "pockettube: import into another profile keeps groups separate",
+        second && second.ok && second.created === 3 && groups2.length === 3 &&
+          groups2.every((g) => !groups.some((x) => x.id === g.id)),
+        JSON.stringify({ res: second, groups: groups2.map((g) => g.name) })
+      );
+
+      await c.profiles.setActiveProfile(p2.id);
+      const list2 = await c.state.getVisibleSubs();
+      check(
+        "pockettube: curated profile gains the imported channels",
+        !!list2 && list2.length === 3 && list2.every((s) => !!s.groupId),
+        JSON.stringify(list2 && list2.map((s) => s.groupId))
+      );
+    })
+    .catch((e) => failures.push("pockettube section crashed: " + e)));
+}
+
 // --- 4. page bridge: getPageChannel after SPA navigation -------------------
 // Regression (user report 2026-11-11): window.ytInitialData is only assigned
 // on full page loads, so reading it first made the letter buttons assign a
