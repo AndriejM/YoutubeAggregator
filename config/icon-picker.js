@@ -152,9 +152,11 @@ window.yga = window.yga || {};
       "aria-label": yga.i18n("groupAvatarColor")
     });
     input.value = color || "#ffffff";
-    input.addEventListener("input", () => {
-      opts.onInput(yga.groupIcons.normalizeColor(input.value) || null);
-    });
+    // Chrome can deliver the colorpicker update only when its dialog closes,
+    // so both events feed the same handler and the value is read from the input.
+    const sync = () => opts.onInput(input.value);
+    input.addEventListener("input", sync);
+    input.addEventListener("change", sync);
     const apply = u.button("groupAvatarColorApply", "yga-panel-primary yga-icon-color-apply");
     apply.disabled = !opts.canApply();
     apply.addEventListener("click", () => opts.onApply());
@@ -202,8 +204,22 @@ window.yga = window.yga || {};
     bar.appendChild(remove);
     bar.appendChild(cancel);
 
+    // The colorpicker may have moved without an `input`/`change` event reaching
+    // us (Chrome fires them only after the dialog closes), so an icon click
+    // reads the live input value: anything the user moved away from what we
+    // rendered wins, otherwise the pending tint (saved color or «Оригинал»).
+    function pendingColor() {
+      const input = box.querySelector(".yga-icon-color-input");
+      const shown = input && yga.groupIcons ? yga.groupIcons.normalizeColor(input.value) : "";
+      if (shown && shown !== (color || "#ffffff")) return shown;
+      return color;
+    }
+
     function pick(avatar) {
-      if (avatar && avatar.type === "builtin" && color) avatar.color = color;
+      if (avatar && avatar.type === "builtin") {
+        const tint = pendingColor();
+        if (tint) avatar.color = tint;
+      }
       close();
       if (opts.onPick) opts.onPick(avatar);
     }

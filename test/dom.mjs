@@ -2049,6 +2049,49 @@ globalThis.innerWidth = 1280;
     yga.iconPicker.close();
     await flush(10);
 
+    // Icon click must honour the colorpicker even when the browser delivered
+    // no `input` event before the click (user report 2026-11-14).
+    const reopenPicker = async () => {
+      await yga.groups.setAvatar(avatarGroup.id, null);
+      await flush(40);
+      yga.panel.open("groups");
+      await flush(40);
+      avatarSection = content.querySelector('[data-section="groups"]');
+      avatarSection.querySelector(".yga-panel-avatar-btn").dispatchEvent({ type: "click" });
+      await flush(10);
+      return document.querySelector(".yga-icon-modal");
+    };
+
+    const silentPicker = await reopenPicker();
+    const silentColorInput = silentPicker && silentPicker.querySelector(".yga-icon-color-input");
+    silentColorInput.value = "#abcdef";
+    silentPicker.querySelector(".yga-icon-cell").dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: icon click uses colorpicker value without input event", !!storedAvatar &&
+      !!storedAvatar.avatar && storedAvatar.avatar.color === "#abcdef",
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+
+    const changePicker = await reopenPicker();
+    const changeColorInput = changePicker && changePicker.querySelector(".yga-icon-color-input");
+    changeColorInput.value = "#223344";
+    changeColorInput.dispatchEvent({ type: "change" });
+    await flush(10);
+    changePicker.querySelector(".yga-icon-cell").dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: icon click uses colorpicker change event", !!storedAvatar &&
+      !!storedAvatar.avatar && storedAvatar.avatar.color === "#223344",
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+
+    const untouchedPicker = await reopenPicker();
+    untouchedPicker.querySelector(".yga-icon-cell").dispatchEvent({ type: "click" });
+    await flush(40);
+    storedAvatar = await avatarStored();
+    check("stage11: untouched colorpicker leaves the icon untinted", !!storedAvatar &&
+      !!storedAvatar.avatar && !storedAvatar.avatar.color,
+      JSON.stringify(storedAvatar && storedAvatar.avatar));
+
     report();
   })
   .catch((e) => {

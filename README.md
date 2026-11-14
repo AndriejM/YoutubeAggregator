@@ -89,8 +89,8 @@ Storage keys: `yga:settings`, `yga:profiles`, `yga:groups`, `yga:account`,
 No build step — edit files and press *Reload* on the extension tile.
 
 ```
-node test/logic.mjs   # RSS parser + worker core + content view (123 checks)
-node test/dom.mjs     # widget/panel DOM layer (163 checks)
+node test/logic.mjs   # RSS parser + worker core + content view (134 checks)
+node test/dom.mjs     # widget/panel DOM layer (166 checks)
 ```
 
 `test/smoke.html` runs the RSS parser in a real browser. Manual checklist: see the
