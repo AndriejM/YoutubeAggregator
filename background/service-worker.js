@@ -22,10 +22,19 @@ const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 1; // 429/5xx/network: one retry after backoff
 const STALE_MS = 24 * 60 * 60 * 1000; // "stale" marker threshold (PLAN.md §10)
 const MAX_ENTRIES_KEPT = 20; // RSS ships ~15 (PLAN.md §6); watched flags need headroom
-// A channel whose feed fails this many times in a row is blocked or deleted on
-// YouTube (user report 2026-11-13: blocked channels stayed listed as subscribed
-// after the PocketTube import). It leaves its group and the profile (§5).
+// A channel whose feed is *definitively* gone this many times in a row is
+// blocked or deleted on YouTube (user report 2026-11-13: blocked channels
+// stayed listed as subscribed after the PocketTube import). It leaves its group
+// and the profile (§5).
 const DEAD_AFTER_ERRORS = 5;
+// Only these statuses prove the feed itself is gone. 429/5xx/network/parse are
+// YouTube pushing back on us, not the channel disappearing: a mass pass over
+// 1100+ channels gets rate-limited and must not bury live channels (user
+// report 2026-11-14: 144 channels of profile "Andi" vanished in one pass).
+const DEAD_STATUSES = [404, 410];
+// Consecutive throttled feeds end the pass: the rest of the queue would only
+// hit the same 429 wall and burn the retry budget of every channel in it.
+const THROTTLE_STOP = 3;
 
 // Freshness floor if yga:settings is missing or unreadable.
 const DEFAULT_MIN_INTERVAL_MS = 90000;
@@ -394,6 +403,7 @@ async function fetchOne(channelId, force) {
   if (fresh && !force) return { skipped: true };
 
   let lastError = "network";
+  let gone = false; // the feed itself answered "no such channel"
   for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
     const headers = { Accept: "application/atom+xml" };
@@ -415,6 +425,7 @@ async function fetchOne(channelId, force) {
       prev.fetchedAt = now();
       prev.error = 0;
       prev.errorStreak = 0;
+      prev.deadStreak = 0;
       await writeRecord(channelId, prev);
       return { ok: true, notModified: true };
     }
@@ -424,6 +435,7 @@ async function fetchOne(channelId, force) {
     }
     if (!response.ok) {
       lastError = "http";
+      gone = DEAD_STATUSES.indexOf(response.status) >= 0;
       break;
     }
     const text = await response.text();
@@ -439,7 +451,8 @@ async function fetchOne(channelId, force) {
       title: feed.title || (prev && prev.title) || "",
       channelId: feed.channelId || channelId,
       error: 0,
-      errorStreak: 0
+      errorStreak: 0,
+      deadStreak: 0
     });
     return { ok: true };
   }
@@ -451,14 +464,23 @@ async function fetchOne(channelId, force) {
   // Consecutive failures, not a total: one network hiccup in a long streak must
   // not bury a live channel (PLAN.md §10).
   record.errorStreak = ((prev && prev.errorStreak) || 0) + 1;
+  // Separate streak for the dead mark: only a feed that answers 404/410 counts,
+  // so a rate-limited pass leaves every channel in its group (§5).
+  record.deadStreak = gone ? ((prev && prev.deadStreak) || 0) + 1 : 0;
   await writeRecord(channelId, record);
-  const profiles = record.errorStreak >= DEAD_AFTER_ERRORS ? await markDead(channelId) : [];
-  return { error: lastError, dead: profiles.length > 0, profiles: profiles };
+  const profiles = record.deadStreak >= DEAD_AFTER_ERRORS ? await markDead(channelId) : [];
+  return {
+    error: lastError,
+    throttled: lastError === "throttled",
+    dead: profiles.length > 0,
+    profiles: profiles
+  };
 }
 
 async function pump() {
   if (pumpRunning) return;
   pumpRunning = true;
+  let throttledRun = 0;
   try {
     while (queue.length) {
       queue.sort((a, b) => (b.priority - a.priority) || (a.seq - b.seq));
@@ -469,7 +491,15 @@ async function pump() {
       } catch (e) {
         console.debug("[yga] RSS job failed for " + job.channelId + ":", e);
       }
+      throttledRun = result.throttled ? throttledRun + 1 : 0;
       job.done(result);
+      // YouTube is pushing back on the whole pass, not on this one channel:
+      // drop the rest of the queue instead of spending every channel's retry
+      // budget against the same 429 wall (user report 2026-11-14).
+      if (throttledRun >= THROTTLE_STOP) {
+        while (queue.length) queue.shift().done({ skipped: true, throttled: true });
+        break;
+      }
       if (queue.length) await new Promise((r) => setTimeout(r, REQUEST_GAP_MS));
     }
   } finally {

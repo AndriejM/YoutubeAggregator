@@ -384,7 +384,7 @@ const chains = []; // async sections; the report waits for all of them
     const deadRec = env.storage.get("yga:videos:" + CH1);
     const comp1 = env.storage.get("yga:profile-channels:p_1");
     const comp2 = env.storage.get("yga:profile-channels:p_2");
-    check("dead: fifth failure marks the channel dead", res && res.dead === 1 && deadRec.errorStreak === 5, JSON.stringify({ dead: res && res.dead, streak: deadRec.errorStreak }));
+    check("dead: fifth failure marks the channel dead", res && res.dead === 1 && deadRec.errorStreak === 5 && deadRec.deadStreak === 5, JSON.stringify({ dead: res && res.dead, streak: deadRec.errorStreak, deadStreak: deadRec.deadStreak }));
     check("dead: channel leaves the group and the profile", comp1[CH1].groupId === null && comp1[CH1].excluded === true, JSON.stringify(comp1[CH1]));
     check("dead: other profiles lose it too", comp2[CH1].groupId === null && comp2[CH1].excluded === true, JSON.stringify(comp2[CH1]));
 
@@ -398,6 +398,83 @@ const chains = []; // async sections; the report waits for all of them
     check("dead: error state stays honest", counts.channelCounts[CH1].error > 0 && counts.channelCounts[CH1].streak === 5, JSON.stringify(counts.channelCounts[CH1]));
   })
     .catch((e) => failures.push("dead channel section crashed: " + e)));
+}
+
+// --- 2d. worker: throttling must never bury a live channel ----------------
+// Browser report 2026-11-14: after the PocketTube import a mass pass over 1100+
+// channels got rate-limited. Every pass advanced the dead streak, so 144 live
+// channels of profile "Andi" left their groups in one run. Only a feed that
+// answers 404/410 may count toward the dead mark, and a throttled pass must
+// stop rather than burn the retry budget of the whole queue.
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+
+  const T = ["UCthrottle00000000000001", "UCthrottle00000000000002", "UCthrottle00000000000003",
+    "UCthrottle00000000000004", "UCthrottle00000000000005"];
+  const comp = {};
+  for (const id of T) comp[id] = { addedAt: 1, lastVisitAt: 0, groupId: "g_1" };
+
+  chains.push(env.sandbox.chrome.storage.local.set({
+    "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": T.map((c, i) => ({ c: c, t: "T" + i })),
+    "yga:groups": [{ id: "g_1", name: "G", profileId: "p_1", order: 0, collapsed: false }],
+    "yga:profile-channels:p_1": comp,
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+  }).then(async () => {
+    env.setResponder(() => ({ status: 429, body: "slow down", etag: null }));
+    for (let i = 1; i <= 8; i++) {
+      await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [T[0]] });
+      await flush();
+    }
+    let rec = env.storage.get("yga:videos:" + T[0]);
+    let held = env.storage.get("yga:profile-channels:p_1");
+    check("throttle: errorStreak still grows", rec.errorStreak === 8, JSON.stringify(rec && rec.errorStreak));
+    check("throttle: deadStreak stays 0", rec.deadStreak === 0, JSON.stringify(rec && rec.deadStreak));
+    check("throttle: rate-limited channel keeps its group", held[T[0]].groupId === "g_1" && !held[T[0]].excluded, JSON.stringify(held[T[0]]));
+
+    env.setResponder(() => {
+      throw new Error("offline");
+    });
+    for (let i = 1; i <= 8; i++) {
+      await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [T[1]] });
+      await flush();
+    }
+    rec = env.storage.get("yga:videos:" + T[1]);
+    held = env.storage.get("yga:profile-channels:p_1");
+    check("throttle: network failures never mark dead", rec.errorStreak === 8 && rec.deadStreak === 0, JSON.stringify([rec.errorStreak, rec.deadStreak]));
+    check("throttle: offline channel keeps its group", held[T[1]].groupId === "g_1" && !held[T[1]].excluded, JSON.stringify(held[T[1]]));
+
+    env.setResponder(() => ({ status: 403, body: "blocked", etag: null }));
+    for (let i = 1; i <= 8; i++) {
+      await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [T[2]] });
+      await flush();
+    }
+    rec = env.storage.get("yga:videos:" + T[2]);
+    held = env.storage.get("yga:profile-channels:p_1");
+    check("throttle: 403 is not a deleted feed", rec.deadStreak === 0 && !held[T[2]].excluded, JSON.stringify([rec.deadStreak, held[T[2]]]));
+
+    // Circuit-breaker: three throttled feeds end the pass, the rest is skipped
+    // untouched (2 fetches each: FETCH_RETRIES = 1).
+    env.setResponder(() => ({ status: 429, body: "slow down", etag: null }));
+    const before = env.fetchCalls.length;
+    const res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: T });
+    const spent = env.fetchCalls.length - before;
+    check("throttle: pass stops after 3 throttled feeds", spent === 6, String(spent));
+    check("throttle: skipped channels are not counted as errors", res && res.ok && res.errors === 3 && res.dead === 0, JSON.stringify(res && { errors: res.errors, dead: res.dead }));
+    check("throttle: skipped channel was never fetched", !env.storage.get("yga:videos:" + T[4]), JSON.stringify(env.storage.get("yga:videos:" + T[4])));
+
+    // A later good pass recovers everything.
+    env.setResponder(() => ({ status: 200, body: fixture, etag: "etag-back" }));
+    const back = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: T });
+    await flush();
+    const after = env.storage.get("yga:profile-channels:p_1");
+    check("throttle: recovery pass fetches the whole queue", back && back.ok && back.requested === T.length, JSON.stringify(back && back.requested));
+    check("throttle: every channel still in its group", T.every((id) => after[id].groupId === "g_1" && !after[id].excluded), JSON.stringify(after));
+  })
+    .catch((e) => failures.push("throttle section crashed: " + e)));
 }
 
 // --- 3. worker: stage-10 filters (Shorts / live / maxAgeDays) -------------
