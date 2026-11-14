@@ -330,10 +330,11 @@ const chains = []; // async sections; the report waits for all of them
     .catch((e) => failures.push("progressive bus section crashed: " + e)));
 }
 
-// --- 2c. worker: dead channels (blocked / deleted on YouTube) --------------
-// Browser report 2026-11-13: after the PocketTube import, blocked channels hung
-// around as subscribed. Five consecutive feed failures drop the channel from its
-// group and exclude it from every profile that holds it (§5, §18.1).
+// --- 2c. worker: a failing feed never removes a channel --------------------
+// User decision 2026-11-14: a YouTube RSS outage must not auto-exclude live
+// channels (the old markDead() buried most of profile "Andi" during one such
+// outage). The worker only counts consecutive failures (`errorStreak`, shipped
+// to the tabs as `streak` for the row's `?×N` chip); removal is the user's.
 
 {
   const env = makeSandbox();
@@ -359,8 +360,8 @@ const chains = []; // async sections; the report waits for all of them
       await flush();
       const rec = env.storage.get("yga:videos:" + CH1);
       const comp = env.storage.get("yga:profile-channels:p_1");
-      check(`dead: streak grows to ${i}`, rec.errorStreak === i, JSON.stringify(rec && rec.errorStreak));
-      check(`dead: still in the group after ${i}`, comp[CH1].groupId === "g_1" && !comp[CH1].excluded, JSON.stringify(comp[CH1]));
+      check(`fail: streak grows to ${i}`, rec.errorStreak === i, JSON.stringify(rec && rec.errorStreak));
+      check(`fail: still in the group after ${i}`, comp[CH1].groupId === "g_1" && !comp[CH1].excluded, JSON.stringify(comp[CH1]));
     }
 
     // One success resets the streak — a transient failure must not bury a live channel.
@@ -368,44 +369,47 @@ const chains = []; // async sections; the report waits for all of them
     const alive = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
     await flush();
     const recAlive = env.storage.get("yga:videos:" + CH1);
-    check("dead: success resets the streak", alive && alive.ok && recAlive.errorStreak === 0, JSON.stringify(recAlive && recAlive.errorStreak));
-    check("dead: live channel keeps its group", env.storage.get("yga:profile-channels:p_1")[CH1].groupId === "g_1");
+    check("fail: success resets the streak", alive && alive.ok && recAlive.errorStreak === 0, JSON.stringify(recAlive && recAlive.errorStreak));
+    check("fail: live channel keeps its group", env.storage.get("yga:profile-channels:p_1")[CH1].groupId === "g_1");
 
     // An includeAllSubs profile with no record still holds the channel.
     const implicit = await env.send({ type: "counters:refresh", profileId: "p_3", force: true });
-    check("dead: implicit catalog profile holds the channel", implicit && implicit.ok && implicit.requested === 1, JSON.stringify(implicit));
+    check("fail: implicit catalog profile holds the channel", implicit && implicit.ok && implicit.requested === 1, JSON.stringify(implicit));
 
+    // Even a long 404 streak never excludes: the channel keeps its group,
+    // stays in every profile, and keeps being fetched.
     env.setResponder(() => ({ status: 404, body: "gone", etag: null }));
     let res = null;
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 8; i++) {
       res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
       await flush();
     }
-    const deadRec = env.storage.get("yga:videos:" + CH1);
+    const failRec = env.storage.get("yga:videos:" + CH1);
     const comp1 = env.storage.get("yga:profile-channels:p_1");
     const comp2 = env.storage.get("yga:profile-channels:p_2");
-    check("dead: fifth failure marks the channel dead", res && res.dead === 1 && deadRec.errorStreak === 5 && deadRec.deadStreak === 5, JSON.stringify({ dead: res && res.dead, streak: deadRec.errorStreak, deadStreak: deadRec.deadStreak }));
-    check("dead: channel leaves the group and the profile", comp1[CH1].groupId === null && comp1[CH1].excluded === true, JSON.stringify(comp1[CH1]));
-    check("dead: other profiles lose it too", comp2[CH1].groupId === null && comp2[CH1].excluded === true, JSON.stringify(comp2[CH1]));
+    check("fail: eighth failure never excludes", res && res.ok && res.errors === 1 && failRec.errorStreak === 8, JSON.stringify({ errors: res && res.errors, streak: failRec.errorStreak }));
+    check("fail: channel keeps its group and profile", comp1[CH1].groupId === "g_1" && !comp1[CH1].excluded, JSON.stringify(comp1[CH1]));
+    check("fail: other profiles keep it too", comp2[CH1].groupId === "g_2" && !comp2[CH1].excluded, JSON.stringify(comp2[CH1]));
 
     const comp3 = env.storage.get("yga:profile-channels:p_3") || {};
-    check("dead: implicit profile gets an excluded record", comp3[CH1] && comp3[CH1].excluded === true, JSON.stringify(comp3));
-    const after = await env.send({ type: "counters:refresh", profileId: "p_3", force: true });
-    check("dead: implicit profile stops fetching it", after && after.ok && after.requested === 0, JSON.stringify(after));
+    check("fail: implicit profile gets no excluded record", !comp3[CH1] || !comp3[CH1].excluded, JSON.stringify(comp3));
 
     const counts = await env.send({ type: "counters:get", profileId: "p_1", channelIds: [CH1] });
-    check("dead: excluded channel is not counted", counts.aggregate && counts.aggregate.newCount === 0, JSON.stringify(counts.aggregate));
-    check("dead: error state stays honest", counts.channelCounts[CH1].error > 0 && counts.channelCounts[CH1].streak === 5, JSON.stringify(counts.channelCounts[CH1]));
+    check("fail: failing channel keeps its cached entries counted", counts.aggregate && counts.aggregate.newCount > 0, JSON.stringify(counts.aggregate));
+    check("fail: streak ships to the tabs for the ?×N chip", counts.channelCounts[CH1].error > 0 && counts.channelCounts[CH1].streak === 8, JSON.stringify(counts.channelCounts[CH1]));
+
+    const after = await env.send({ type: "counters:refresh", profileId: "p_3", force: true });
+    check("fail: implicit profile keeps fetching it", after && after.ok && after.requested === 1, JSON.stringify(after));
   })
-    .catch((e) => failures.push("dead channel section crashed: " + e)));
+    .catch((e) => failures.push("failing feed section crashed: " + e)));
 }
 
 // --- 2d. worker: throttling must never bury a live channel ----------------
 // Browser report 2026-11-14: after the PocketTube import a mass pass over 1100+
-// channels got rate-limited. Every pass advanced the dead streak, so 144 live
-// channels of profile "Andi" left their groups in one run. Only a feed that
-// answers 404/410 may count toward the dead mark, and a throttled pass must
-// stop rather than burn the retry budget of the whole queue.
+// channels got rate-limited. Every pass advanced the failure streak, so 144 live
+// channels of profile "Andi" left their groups in one run. No status may remove
+// a channel now, and a throttled pass must stop rather than burn the retry
+// budget of the whole queue.
 
 {
   const env = makeSandbox();
@@ -432,7 +436,6 @@ const chains = []; // async sections; the report waits for all of them
     let rec = env.storage.get("yga:videos:" + T[0]);
     let held = env.storage.get("yga:profile-channels:p_1");
     check("throttle: errorStreak still grows", rec.errorStreak === 8, JSON.stringify(rec && rec.errorStreak));
-    check("throttle: deadStreak stays 0", rec.deadStreak === 0, JSON.stringify(rec && rec.deadStreak));
     check("throttle: rate-limited channel keeps its group", held[T[0]].groupId === "g_1" && !held[T[0]].excluded, JSON.stringify(held[T[0]]));
 
     env.setResponder(() => {
@@ -444,7 +447,7 @@ const chains = []; // async sections; the report waits for all of them
     }
     rec = env.storage.get("yga:videos:" + T[1]);
     held = env.storage.get("yga:profile-channels:p_1");
-    check("throttle: network failures never mark dead", rec.errorStreak === 8 && rec.deadStreak === 0, JSON.stringify([rec.errorStreak, rec.deadStreak]));
+    check("throttle: network failures never exclude", rec.errorStreak === 8, JSON.stringify(rec.errorStreak));
     check("throttle: offline channel keeps its group", held[T[1]].groupId === "g_1" && !held[T[1]].excluded, JSON.stringify(held[T[1]]));
 
     env.setResponder(() => ({ status: 403, body: "blocked", etag: null }));
@@ -454,7 +457,7 @@ const chains = []; // async sections; the report waits for all of them
     }
     rec = env.storage.get("yga:videos:" + T[2]);
     held = env.storage.get("yga:profile-channels:p_1");
-    check("throttle: 403 is not a deleted feed", rec.deadStreak === 0 && !held[T[2]].excluded, JSON.stringify([rec.deadStreak, held[T[2]]]));
+    check("throttle: 403 never excludes", !held[T[2]].excluded, JSON.stringify(held[T[2]]));
 
     // Circuit-breaker: three throttled feeds end the pass, the rest is skipped
     // untouched (2 fetches each: FETCH_RETRIES = 1).
@@ -463,7 +466,7 @@ const chains = []; // async sections; the report waits for all of them
     const res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: T });
     const spent = env.fetchCalls.length - before;
     check("throttle: pass stops after 3 throttled feeds", spent === 6, String(spent));
-    check("throttle: skipped channels are not counted as errors", res && res.ok && res.errors === 3 && res.dead === 0, JSON.stringify(res && { errors: res.errors, dead: res.dead }));
+    check("throttle: skipped channels are not counted as errors", res && res.ok && res.errors === 3, JSON.stringify(res && { errors: res.errors }));
     check("throttle: skipped channel was never fetched", !env.storage.get("yga:videos:" + T[4]), JSON.stringify(env.storage.get("yga:videos:" + T[4])));
 
     // A later good pass recovers everything.

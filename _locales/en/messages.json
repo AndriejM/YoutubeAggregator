@@ -107,6 +107,10 @@
     "message": "RSS unavailable — counter may be outdated",
     "description": "Tooltip of the ? counter chip"
   },
+  "counterErrorStreak": {
+    "message": "RSS unavailable — {count} failures in a row; counter may be outdated",
+    "description": "Tooltip of the ?×N counter chip showing consecutive feed failures"
+  },
   "counterStale": {
     "message": "Data is older than a day",
     "description": "Tooltip of a dimmed stale counter chip"

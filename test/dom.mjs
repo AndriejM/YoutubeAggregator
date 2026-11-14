@@ -2092,6 +2092,45 @@ globalThis.innerWidth = 1280;
       !!storedAvatar.avatar && !storedAvatar.avatar.color,
       JSON.stringify(storedAvatar && storedAvatar.avatar));
 
+    // --- ?×N row chip: a failing feed never removes the channel -------------
+    // User decision 2026-11-14: the worker no longer excludes failing channels
+    // (a YouTube RSS outage buried live channels); the row chip shows the
+    // consecutive-failure count so the user can drop the channel manually.
+    {
+      for (const stale of document.querySelectorAll('[data-yga="widget"]')) stale.remove();
+      const sWidget = document.createElement("div");
+      sWidget.className = "yga-widget";
+      sWidget.setAttribute("data-yga", "widget");
+      const sHost = document.createElement("div");
+      sHost.className = "yga-list";
+      sWidget.appendChild(sHost);
+      root.appendChild(sWidget);
+
+      const errProfile = await yga.profiles.create("Failing");
+      await yga.profiles.addChannel(errProfile.id, CH1);
+      await yga.profiles.setActiveProfile(errProfile.id);
+      const errAt = Date.now();
+      yga.state.applyInitSnapshot(
+        { [CH1]: { newCount: 0, fetchedAt: errAt, error: errAt, streak: 7, at: [] } },
+        { profileId: errProfile.id, newCount: 0, errorCount: 1, stale: false },
+        999999
+      );
+      const sList = await yga.state.getVisibleSubs();
+      yga.widget.render(sList);
+      await flush(10);
+
+      const errRow = sWidget.querySelector('[data-yga-row="' + CH1 + '"]');
+      const errChip = errRow && errRow.querySelector(".yga-count");
+      check("streak: failing channel keeps its row", !!errRow);
+      check("streak: row chip shows ?×7", !!errChip && errChip.textContent === "?×7",
+        JSON.stringify(errChip && errChip.textContent));
+      check("streak: row chip carries the error style", !!errChip && errChip.classList.contains("yga-err"));
+
+      sWidget.remove();
+      await yga.profiles.setActiveProfile("p_1");
+      await flush(10);
+    }
+
     report();
   })
   .catch((e) => {

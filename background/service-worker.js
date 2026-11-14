@@ -22,16 +22,6 @@ const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 1; // 429/5xx/network: one retry after backoff
 const STALE_MS = 24 * 60 * 60 * 1000; // "stale" marker threshold (PLAN.md §10)
 const MAX_ENTRIES_KEPT = 20; // RSS ships ~15 (PLAN.md §6); watched flags need headroom
-// A channel whose feed is *definitively* gone this many times in a row is
-// blocked or deleted on YouTube (user report 2026-11-13: blocked channels
-// stayed listed as subscribed after the PocketTube import). It leaves its group
-// and the profile (§5).
-const DEAD_AFTER_ERRORS = 5;
-// Only these statuses prove the feed itself is gone. 429/5xx/network/parse are
-// YouTube pushing back on us, not the channel disappearing: a mass pass over
-// 1100+ channels gets rate-limited and must not bury live channels (user
-// report 2026-11-14: 144 channels of profile "Andi" vanished in one pass).
-const DEAD_STATUSES = [404, 410];
 // Consecutive throttled feeds end the pass: the rest of the queue would only
 // hit the same 429 wall and burn the retry budget of every channel in it.
 const THROTTLE_STOP = 3;
@@ -248,39 +238,6 @@ async function bumpVideosIndex(ids) {
   await chrome.storage.local.set(payload);
 }
 
-// A channel whose feed keeps failing is blocked or deleted on YouTube: it leaves
-// its group (§18.1) and is excluded from every profile that holds it (§5).
-// `excluded` is the user-choice flag that syncProfile never resets, so a channel
-// YouTube still lists in the catalog does not come back on the next catalog read
-// — the panel's restore button (addChannel) is the only way back.
-async function markDead(channelId) {
-  const stored = await chrome.storage.local.get("yga:profiles");
-  const profiles = stored["yga:profiles"] || {};
-  const touched = [];
-  for (const profileId of Object.keys(profiles)) {
-    const key = "yga:profile-channels:" + profileId;
-    const compStore = await chrome.storage.local.get(key);
-    const comp = compStore[key] || {};
-    const rec = comp[channelId];
-    if (!rec) {
-      // An includeAllSubs profile holds the catalog implicitly, so a channel
-      // with no record is still a member: the dead flag needs a record of its own.
-      if (!profiles[profileId].includeAllSubs) continue;
-      comp[channelId] = { addedAt: now(), lastVisitAt: now(), groupId: null, excluded: true };
-    } else {
-      if (rec.excluded && !rec.groupId) continue;
-      rec.groupId = null;
-      rec.excluded = true;
-      rec.lastVisitAt = now();
-    }
-    const payload = {};
-    payload[key] = comp;
-    await chrome.storage.local.set(payload);
-    touched.push(profileId);
-  }
-  return touched;
-}
-
 // Profile-scoped aggregate → tabs bus so other tabs learn about resets
 // without a full refresh.
 // The number is lastVisitAt-aware (per-profile composition), so it matches the
@@ -403,7 +360,6 @@ async function fetchOne(channelId, force) {
   if (fresh && !force) return { skipped: true };
 
   let lastError = "network";
-  let gone = false; // the feed itself answered "no such channel"
   for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
     const headers = { Accept: "application/atom+xml" };
@@ -425,7 +381,6 @@ async function fetchOne(channelId, force) {
       prev.fetchedAt = now();
       prev.error = 0;
       prev.errorStreak = 0;
-      prev.deadStreak = 0;
       await writeRecord(channelId, prev);
       return { ok: true, notModified: true };
     }
@@ -435,7 +390,6 @@ async function fetchOne(channelId, force) {
     }
     if (!response.ok) {
       lastError = "http";
-      gone = DEAD_STATUSES.indexOf(response.status) >= 0;
       break;
     }
     const text = await response.text();
@@ -451,8 +405,7 @@ async function fetchOne(channelId, force) {
       title: feed.title || (prev && prev.title) || "",
       channelId: feed.channelId || channelId,
       error: 0,
-      errorStreak: 0,
-      deadStreak: 0
+      errorStreak: 0
     });
     return { ok: true };
   }
@@ -462,18 +415,14 @@ async function fetchOne(channelId, force) {
   record.fetchedAt = now();
   record.error = now();
   // Consecutive failures, not a total: one network hiccup in a long streak must
-  // not bury a live channel (PLAN.md §10).
+  // not bury a live channel (PLAN.md §10). The streak drives the row's `?×N`
+  // indicator; the worker never removes a channel on its own (user decision
+  // 2026-11-14: a YouTube RSS outage must not auto-exclude live channels).
   record.errorStreak = ((prev && prev.errorStreak) || 0) + 1;
-  // Separate streak for the dead mark: only a feed that answers 404/410 counts,
-  // so a rate-limited pass leaves every channel in its group (§5).
-  record.deadStreak = gone ? ((prev && prev.deadStreak) || 0) + 1 : 0;
   await writeRecord(channelId, record);
-  const profiles = record.deadStreak >= DEAD_AFTER_ERRORS ? await markDead(channelId) : [];
   return {
     error: lastError,
-    throttled: lastError === "throttled",
-    dead: profiles.length > 0,
-    profiles: profiles
+    throttled: lastError === "throttled"
   };
 }
 
@@ -542,34 +491,22 @@ async function refreshChannels(profileId, channelIds, opts) {
   const enq = enqueue(channelIds, opts);
   while (enq.jobs.length < enq.expected) await new Promise((r) => setTimeout(r, 100));
   let errors = 0;
-  let dead = 0;
-  const deadProfiles = new Set();
   for (const j of enq.jobs) {
     if (j.result && j.result.error) errors++;
-    if (j.result && j.result.dead) {
-      dead++;
-      for (const pid of j.result.profiles || []) deadProfiles.add(pid);
-    }
   }
   // Per-channel counts travelled through the bus while the pump was draining;
   // deliver the window still pending before the aggregate so the tabs never
   // wait for the whole refresh to finish.
   await flushEmitQueue();
   const agg = profileId ? await emitProfileCounts(profileId) : null;
-  // A dead channel left its group in every profile that held it, so those
-  // totals changed too and their tabs must re-derive them.
-  for (const pid of deadProfiles) {
-    if (pid !== profileId) await emitProfileCounts(pid, true);
-  }
   await flushEmitQueue();
   lastRun = {
     at: started,
     mode: opts.scheduled ? "scheduled" : "onOpen",
     requested: enq.expected,
-    errors: errors,
-    dead: dead
+    errors: errors
   };
-  return { requested: enq.expected, queued: channelIds.length - enq.expected, errors: errors, dead: dead, lastRun: lastRun, aggregate: agg, aggregateSeq: aggregateSeq };
+  return { requested: enq.expected, queued: channelIds.length - enq.expected, errors: errors, lastRun: lastRun, aggregate: agg, aggregateSeq: aggregateSeq };
 }
 
 // ---- scheduled mode (PLAN.md §10; the on/off switch is stage 4) ----

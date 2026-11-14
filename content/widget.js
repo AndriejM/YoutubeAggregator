@@ -345,13 +345,18 @@ window.yga = window.yga || {};
   // --- counter chip (stage 3, PLAN.md §10) ---
 
   function countText(sub) {
-    if (sub.counterError) return "?";
+    // `?×N` — N consecutive RSS failures (PLAN.md §10). The worker never
+    // removes a failing channel itself; the growing N is the signal for the
+    // user to drop it manually (user decision 2026-11-14).
+    if (sub.counterError) return "?×" + (sub.counterStreak || 1);
     if (sub.newCount >= 15) return "15+";
     return String(sub.newCount);
   }
 
   function countTitle(sub) {
-    if (sub.counterError) return yga.i18n("counterError");
+    if (sub.counterError) {
+      return yga.i18n("counterErrorStreak").replace("{count}", String(sub.counterStreak || 1));
+    }
     if (sub.counterStale) return yga.i18n("counterStale");
     return yga.i18n("newVideos").replace("{count}", String(sub.newCount));
   }

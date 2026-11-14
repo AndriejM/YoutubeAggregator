@@ -141,6 +141,7 @@ window.yga = window.yga || {};
         s.groupId = rec.groupId || null; // group tree (§18)
         s.counterFetchedAt = c ? c.fetchedAt : 0;
         s.counterError = c && c.error ? c.error : 0;
+        s.counterStreak = c && c.streak ? c.streak : 0;
         s.counterStale = !!c && !!c.fetchedAt && now - c.fetchedAt > STALE_MS;
       }
       // Footer totals come from the rows: they are the active profile's view
