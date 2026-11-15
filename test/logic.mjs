@@ -1064,6 +1064,132 @@ const chains = []; // async sections; the report waits for all of them
   })().catch((e) => failures.push("bridge section crashed: " + e)));
 }
 
+// --- 4b. page bridge: SPA navigation through a borrowed endpoint anchor ------
+// Clean-Chrome report 2026-11-15: the kevlar router exposes none of the old
+// navigation globals (ytCommand / ytglobal / ytPageManagerApi / ytspb / yt.load
+// are all undefined) and ignores a click on an anchor it did not create, so a
+// widget row click became a full page load. The one thing that still navigates
+// in SPA is one of YouTube's OWN endpoint anchors — they carry the command in an
+// own `data` property resolved through getForm(). The bridge borrows such an
+// anchor for exactly one click, so the regression is: our command must reach
+// getForm(), the anchor must be restored, our own nodes must never be borrowed,
+// and a URL we cannot describe as a complete command must not be synthesised.
+
+{
+  const bridgeSrc = read("page/bridge.js");
+
+  function fakeAnchor(opts) {
+    const a = {
+      attrs: { href: "/feed/subscriptions" },
+      data: { commandMetadata: { webCommandMetadata: { url: "/feed/subscriptions" } } },
+      stamped: null,
+      dispatched: 0,
+      inYga: !!(opts && opts.inYga),
+      getAttribute(name) {
+        return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null;
+      },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      // YouTube resolves the navigation command through getForm() synchronously
+      // during dispatch, reading the anchor's CURRENT own `data`.
+      getForm() { return this.data; },
+      closest(sel) { return this.inYga && sel === "[data-yga]" ? {} : null; },
+      dispatchEvent() {
+        this.dispatched += 1;
+        this.stamped = { href: this.getAttribute("href"), data: this.data };
+        return true;
+      }
+    };
+    return a;
+  }
+
+  function loadNavBridge(anchors) {
+    const listeners = {};
+    const responses = [];
+    const guide = anchors ? { querySelectorAll: () => anchors } : null;
+    const sandbox = {
+      console, JSON, Promise, Set, Object, Array, String, Number, RegExp, Date, setTimeout,
+      CustomEvent: function (type, init) { this.type = type; this.detail = init && init.detail; },
+      MouseEvent: function (type, init) { this.type = type; if (init) for (const k in init) this[k] = init[k]; },
+      location: { origin: "https://www.youtube.com", href: "https://www.youtube.com/feed/subscriptions" },
+      document: {
+        body: {},
+        querySelector: (sel) => (sel === "#guide" ? guide : null),
+        querySelectorAll: () => anchors || []
+      }
+    };
+    sandbox.globalThis = sandbox;
+    sandbox.window = sandbox;
+    sandbox.addEventListener = (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); };
+    sandbox.removeEventListener = () => {};
+    sandbox.postMessage = (msg) => { responses.push(msg); };
+    sandbox.dispatchEvent = () => {};
+    vm.createContext(sandbox);
+    vm.runInContext(bridgeSrc, sandbox, { filename: "bridge.js" });
+    const inner = vm.runInContext("globalThis", sandbox);
+    return {
+      send(cmd, arg) {
+        listeners.message[0]({ source: inner, data: { __yga: "cmd", id: 1, nonce: "n", cmd: cmd, arg: arg } });
+      },
+      fire(name) { (listeners[name] || []).slice().forEach((fn) => fn({ type: name })); },
+      async last() {
+        for (let i = 0; i < 80 && !responses.length; i++) await flush(5);
+        return responses[responses.length - 1];
+      }
+    };
+  }
+
+  chains.push((async () => {
+    const anchor = fakeAnchor();
+    const originalData = anchor.data;
+    const nav = loadNavBridge([anchor]);
+    nav.send("navigate", "/channel/" + CH1 + "/videos");
+    await flush(10);
+    check(
+      "bridge: the borrowed anchor receives our channel browse command",
+      anchor.dispatched === 1 && !!anchor.stamped &&
+        anchor.stamped.href === "/channel/" + CH1 + "/videos" &&
+        !!anchor.stamped.data && !!anchor.stamped.data.browseEndpoint &&
+        anchor.stamped.data.browseEndpoint.browseId === CH1,
+      JSON.stringify(anchor.stamped && { href: anchor.stamped.href, browseId: anchor.stamped.data.browseEndpoint && anchor.stamped.data.browseEndpoint.browseId })
+    );
+    check(
+      "bridge: the borrowed anchor is restored after the click",
+      anchor.attrs.href === "/feed/subscriptions" &&
+        anchor.data === originalData && anchor.data.commandMetadata.webCommandMetadata.url === "/feed/subscriptions",
+      JSON.stringify(anchor.attrs)
+    );
+    nav.fire("yt-navigate-start");
+    const ok = await nav.last();
+    check(
+      "bridge: navigate reports SPA success through endpoint-click",
+      !!ok && ok.ok === true && !!ok.data && ok.data.ok === true && ok.data.api === "endpoint-click",
+      JSON.stringify(ok && ok.data)
+    );
+
+    const ours = fakeAnchor({ inYga: true });
+    const guarded = loadNavBridge([ours]);
+    guarded.send("navigate", "/channel/" + CH1 + "/videos");
+    const skipped = await guarded.last();
+    check(
+      "bridge: an anchor inside our own widget is never borrowed",
+      ours.dispatched === 0 && !!skipped && skipped.data && skipped.data.ok === false &&
+        String(skipped.data.errors || "").indexOf("endpoint-click:false") >= 0,
+      JSON.stringify(skipped && skipped.data && skipped.data.errors)
+    );
+
+    const untouched = fakeAnchor();
+    const other = loadNavBridge([untouched]);
+    other.send("navigate", "/watch?v=aaa11111111");
+    const declined = await other.last();
+    check(
+      "bridge: a href we cannot describe as a complete command is not synthesised",
+      untouched.dispatched === 0 && !!declined && declined.data &&
+        String(declined.data.errors || "").indexOf("endpoint-click:false") >= 0,
+      JSON.stringify(declined && declined.data && declined.data.errors)
+    );
+  })().catch((e) => failures.push("endpoint-click section crashed: " + e)));
+}
+
 // --- 5. api-client: guide truncation must not hide browse channels ---------
 // Regression (user report 2026-11-11): the guide embeds only the first
 // subscriptions, so browse used to run only when the guide was empty and

@@ -49,16 +49,39 @@ window.yga = window.yga || {};
     return node;
   }
 
+  // The combobox only ever offers the visible profiles: the built-in
+  // «Все подписки» entry can be hidden (§8.3). An active profile that just
+  // became hidden falls back to the first visible one, so the widget never sits
+  // on a profile it does not show. Returns the profile now selected.
   function profileOptions(select, activeId) {
-    lastActiveId = activeId || yga.profiles.BUILTIN_ID;
+    const list = yga.profiles.visible(settings);
+    const shown = list.some((p) => p.id === activeId)
+      ? activeId
+      : (list[0] && list[0].id) || yga.profiles.BUILTIN_ID;
+    lastActiveId = shown;
     select.textContent = "";
-    for (const p of yga.profiles.list()) {
+    for (const p of list) {
       const opt = el("option", null, { value: p.id });
       opt.textContent = p.name;
       select.appendChild(opt);
     }
     // Stage 8: no «+ New profile» entry — profile CRUD lives in the panel.
-    select.value = activeId || yga.profiles.BUILTIN_ID;
+    select.value = shown;
+    return shown;
+  }
+
+  // Rebuild the combobox after a visibility edit and follow the fallback with
+  // the stored active profile, so the list and the combobox agree (§8.3).
+  function syncProfileOptions(widget) {
+    const select = widget.querySelector(".yga-profile-select");
+    if (!select || select.disabled) return;
+    const previous = lastActiveId;
+    const shown = profileOptions(select, previous);
+    if (shown && shown !== previous) {
+      yga.profiles.setActiveProfile(shown).then(() => {
+        if (yga.state) yga.state.refreshVisible();
+      });
+    }
   }
 
   let profileUnsub = null; // one live listener across SPA remounts
@@ -206,6 +229,8 @@ window.yga = window.yga || {};
     // repaint (§18.3). Profile sort changes arrive as a profile event, which
     // already re-renders the tree (§18.6).
     if (before.hideEmptyGroups !== after.hideEmptyGroups) yga.widget.render(lastList);
+    // Hiding or showing «Все подписки» changes the combobox contents (§8.3).
+    if (before.showAllSubsProfile !== after.showAllSubsProfile) syncProfileOptions(widget);
     // A slot move is a DOM rehang, not a remount: the list keeps its DOM.
     if (guideIndexOf(previous) !== guideIndexOf(next)) applyGuideIndex(widget);
   }
@@ -237,11 +262,10 @@ window.yga = window.yga || {};
     let activeId = null;
     yga.profiles.load().then(() =>
       yga.profiles.activeProfileId().then((id) => {
-        activeId = id;
+        activeId = profileOptions(select, id);
         select.disabled = false;
         select.removeAttribute("aria-label-placeholder");
         select.setAttribute("aria-label", yga.i18n("profilesLabel"));
-        profileOptions(select, activeId);
       })
     );
 
@@ -250,12 +274,13 @@ window.yga = window.yga || {};
     // panel's job (§9.2): the widget is for viewing.
     select.addEventListener("change", async () => {
       activeId = select.value;
+      lastActiveId = activeId;
       await yga.profiles.setActiveProfile(activeId);
       await yga.state.refreshVisible(); // instant, no YouTube request
     });
 
     yga.profiles.onProfilesChanged(() => {
-      profileOptions(select, activeId);
+      activeId = profileOptions(select, activeId);
     });
   }
 

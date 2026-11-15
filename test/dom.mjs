@@ -619,6 +619,40 @@ env.sandbox.chrome.storage.local
       "stage8: profile select has no «+ New profile» option",
       !Array.from(mounted.querySelector(".yga-profile-select").children).some((o) => o.value === "__add__")
     );
+
+    // --- §8.3: «Все подписки» can be hidden from the combobox ---------------
+    const sel = mounted.querySelector(".yga-profile-select");
+    const optIds = () => Array.from(sel.children).map((o) => o.getAttribute("value"));
+    const pHidden = await yga.profiles.create("Hidden test");
+    await flush(20);
+    check(
+      "stage8.3: the combobox lists the built-in profile while it is shown",
+      optIds().includes("p_1"),
+      JSON.stringify(optIds())
+    );
+    await yga.profiles.saveSettingsPath("widget.showAllSubsProfile", false);
+    await flush(20);
+    check(
+      "stage8.3: hiding «Все подписки» removes it from the combobox",
+      !optIds().includes("p_1") && optIds().includes(pHidden.id),
+      JSON.stringify(optIds())
+    );
+    check(
+      "stage8.3: an active built-in profile falls back to a visible one",
+      sel.value !== "p_1" && yga.profiles.lastActiveId() === sel.value,
+      sel.value + "/" + yga.profiles.lastActiveId()
+    );
+    await yga.profiles.saveSettingsPath("widget.showAllSubsProfile", true);
+    await flush(20);
+    check(
+      "stage8.3: showing «Все подписки» again puts it back in the combobox",
+      optIds().includes("p_1"),
+      JSON.stringify(optIds())
+    );
+    // profiles.remove() is destructive and asks for confirmation (§9.2).
+    globalThis.confirm = () => true;
+    await yga.profiles.remove(pHidden.id);
+    await flush(20);
     check("stage8: no footer / toolbar row left in the widget",
       !mounted.querySelector(".yga-footer") && !mounted.querySelector(".yga-toolbar"));
 
@@ -851,7 +885,7 @@ env.sandbox.chrome.storage.local
       JSON.stringify(letters.map((b) => b.textContent))
     );
     check(
-      "stage9: the built-in all-subs profile has no letter button",
+      "stage9: the built-in all-subs profile is skipped while it has no groups",
       !!gpHost && !gpHost.querySelector('[data-yga-profile="p_1"]')
     );
     check(
@@ -1587,6 +1621,102 @@ globalThis.innerWidth = 1280;
       JSON.stringify(gpChurn.styleVars)
     );
     churnActions.remove();
+
+    // --- stage 9: the built-in all-subs profile joins the picker -------------
+    // Clean-Chrome report 2026-11-15: a fresh browser profile has only
+    // «Все подписки», and users do group channels there (the widget renders
+    // those groups). Excluding the built-in profile outright left zero letter
+    // buttons, i.e. the picker vanished from every channel and watch page.
+    // Rule: a profile gets a button when it is curated OR it has groups.
+    const staleWatchActions = document.querySelector("#actions");
+    if (staleWatchActions) staleWatchActions.remove();
+    globalThis.location.pathname = "/channel/" + CH1;
+    const pickerHeader = document.createElement("div");
+    pickerHeader.setAttribute("id", "page-header");
+    pickerHeader.appendChild(document.createElement("ytd-subscribe-button-renderer"));
+    root.appendChild(pickerHeader);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpNoGroups = document.querySelector("[data-yga-group-buttons]");
+    const idsOf = (host) => [...host.querySelectorAll(".yga-gp-letter")].map((b) => b.getAttribute("data-yga-profile"));
+    check(
+      "stage9: built-in all-subs profile without groups still gets no button",
+      !!gpNoGroups && gpNoGroups.querySelectorAll(".yga-gp-letter").length === 2 &&
+        !gpNoGroups.querySelector('[data-yga-profile="p_1"]'),
+      JSON.stringify(gpNoGroups && idsOf(gpNoGroups))
+    );
+    const allSubsGroup = await yga.groups.create("Built-in group", "p_1");
+    await yga.profiles.setGroup("p_1", [CH1], allSubsGroup.id);
+    await flush(20);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpWithGroups = document.querySelector("[data-yga-group-buttons]");
+    const p1Btn = gpWithGroups && gpWithGroups.querySelector('[data-yga-profile="p_1"]');
+    check(
+      "stage9: built-in all-subs profile with groups gets a letter button",
+      !!p1Btn && gpWithGroups.querySelectorAll(".yga-gp-letter").length === 3,
+      JSON.stringify(gpWithGroups && idsOf(gpWithGroups))
+    );
+    p1Btn.dispatchEvent({ type: "click" });
+    await flush(40);
+    const p1Menu = document.querySelector("[data-yga-group-menu]");
+    const p1Checks = p1Menu ? [...p1Menu.querySelectorAll(".yga-gp-check")] : [];
+    check(
+      "stage9: the built-in profile menu lists its group, checked for the page channel",
+      p1Checks.length === 1 && p1Checks[0].checked === true,
+      JSON.stringify(p1Menu && p1Menu.textContent)
+    );
+    docEvents.fire("pointerdown", { target: root });
+    await flush(10);
+    await yga.groups.remove(allSubsGroup.id);
+    await flush(20);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpAfterRemove = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: losing its last group takes the built-in button away",
+      !!gpAfterRemove && !gpAfterRemove.querySelector('[data-yga-profile="p_1"]'),
+      JSON.stringify(gpAfterRemove && idsOf(gpAfterRemove))
+    );
+
+    // --- §8.3: «Все подписки» can be hidden from the letter buttons ---------
+    // The built-in profile joins the picker as soon as it has groups; hiding it
+    // is now a user choice (widget.showAllSubsProfile), not a rule.
+    const hiddenGroup = await yga.groups.create("Built-in group", "p_1");
+    await yga.profiles.setGroup("p_1", [CH1], hiddenGroup.id);
+    await flush(20);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpShown = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage9: hiding is off by default, so the grouped built-in profile shows",
+      !!gpShown && !!gpShown.querySelector('[data-yga-profile="p_1"]'),
+      JSON.stringify(gpShown && idsOf(gpShown))
+    );
+    await yga.profiles.saveSettingsPath("widget.showAllSubsProfile", false);
+    await flush(20);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpHidden = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage8.3: hiding «Все подписки» removes its letter button, curated ones stay",
+      !!gpHidden && !gpHidden.querySelector('[data-yga-profile="p_1"]') &&
+        gpHidden.querySelectorAll(".yga-gp-letter").length === 2,
+      JSON.stringify(gpHidden && idsOf(gpHidden))
+    );
+    await yga.profiles.saveSettingsPath("widget.showAllSubsProfile", true);
+    await flush(20);
+    windowEvents.fire("yt-navigate-finish", {});
+    await flush(40);
+    const gpBack = document.querySelector("[data-yga-group-buttons]");
+    check(
+      "stage8.3: showing «Все подписки» again brings its letter button back",
+      !!gpBack && !!gpBack.querySelector('[data-yga-profile="p_1"]'),
+      JSON.stringify(gpBack && idsOf(gpBack))
+    );
+    await yga.groups.remove(hiddenGroup.id);
+    await flush(20);
+    pickerHeader.remove();
 
     // --- incremental render (PLAN.md §18.3) --------------------------------
     // A re-render of an unchanged tree must not rebuild the sidebar: the same

@@ -821,6 +821,16 @@ window.yga = window.yga || {};
     });
     host.appendChild(u.field("widgetWatchPageButton", watchButton, "widgetWatchPageButtonHint"));
 
+    // §8.3: the built-in «Все подписки» profile is optional in the viewing UI.
+    // Hiding it leaves the widget combobox and the letter buttons; the panel
+    // keeps listing the profile so the option can be turned back on.
+    const showAllSubs = el("input", "yga-panel-check", { type: "checkbox" });
+    showAllSubs.checked = w.showAllSubsProfile !== false;
+    showAllSubs.addEventListener("change", async () => {
+      await u.save("widget.showAllSubsProfile", showAllSubs.checked);
+    });
+    host.appendChild(u.field("widgetShowAllSubsProfile", showAllSubs, "widgetShowAllSubsProfileHint"));
+
     // §18.6: the profile sort orders channels inside groups.
     const profileId = await yga.profiles.activeProfileId();
     const profile = yga.profiles.get(profileId);

@@ -487,6 +487,14 @@
     "message": "One small button per profile, left of the Like/Dislike buttons.",
     "description": "Hint for the watch page profile buttons toggle"
   },
+  "widgetShowAllSubsProfile": {
+    "message": "Show the \"All subscriptions\" option in the widget and on channel and watch pages",
+    "description": "Toggle: show or hide the built-in all subscriptions profile"
+  },
+  "widgetShowAllSubsProfileHint": {
+    "message": "When off, the built-in profile disappears from the widget list and the letter buttons. The configuration panel still shows it.",
+    "description": "Hint for the all subscriptions profile visibility toggle"
+  },
   "profileColor": {
     "message": "Profile color",
     "description": "Colorpicker label for a profile row"

@@ -80,7 +80,7 @@ window.yga = window.yga || {};
       activeProfileId: BUILTIN_ID,
       refresh: { mode: "onOpen", scheduled: { enabled: false, periodInMinutes: 240, maxChannelsPerRun: 60 }, batch: 12, minIntervalMs: 90000 },
       filters: { hideShorts: false, hideLive: false, maxAgeDays: 0 },
-      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true, watchPageButton: true },
+      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true, watchPageButton: true, showAllSubsProfile: true },
       theme: { followYouTube: true, accent: "#c00" }
     };
   }
@@ -288,6 +288,21 @@ window.yga = window.yga || {};
         return (profiles[a].name || "").localeCompare(profiles[b].name || "");
       });
       return ids.map((id) => profiles[id]);
+    },
+
+    // The built-in «Все подписки» profile is optional in the viewing UI
+    // (widget.showAllSubsProfile, panel §8.3): when hidden it leaves the widget
+    // combobox and the channel/watch letter buttons. Curated profiles are never
+    // affected, and the configuration panel always lists every profile so the
+    // option can be turned back on.
+    showAllSubsProfile(s) {
+      const w = ((s || settings) || {}).widget || {};
+      return w.showAllSubsProfile !== false;
+    },
+
+    visible(s) {
+      const show = this.showAllSubsProfile(s);
+      return this.list().filter((p) => show || !p.includeAllSubs);
     },
 
     get(id) {

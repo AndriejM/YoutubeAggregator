@@ -66,4 +66,5 @@ examples/
 .codegraph/
 .kilocode/
 .roo/
+.playwright-mcp/
 /dfs-mcp-inspect/

@@ -434,7 +434,10 @@
   z-index: 10000;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  /* An active letter carries a 4px ring (see .yga-gp-letter.yga-gp-on). Two
+     neighbours must leave room for both rings, or they merge into one band and
+     the buttons look like they overlap. */
+  gap: 10px;
   will-change: left, top;
   transition: none;
 }

@@ -576,11 +576,84 @@
       return true;
     }
 
+    // Clean-profile report 2026-11-15: the kevlar router no longer exposes any
+    // of ytCommand / ytglobal / ytPageManagerApi / ytspb / yt.load (probed live:
+    // all undefined), and it ignores a click on an anchor it did not create —
+    // both a temp anchor on body and one inside ytd-app produced a real page
+    // load. What still works is one of YouTube's OWN endpoint anchors: they carry
+    // the navigation command in an own `data` property and resolve it through
+    // `getForm()`, and a synthetic click on them fires yt-navigate-start (no
+    // reload). So we borrow such an anchor for exactly one click: stamp our
+    // command, dispatch, restore.
+    function endpointAnchor() {
+      const scopes = [document.querySelector("#guide"), document];
+      for (const scope of scopes) {
+        if (!scope || !scope.querySelectorAll) continue;
+        const list = scope.querySelectorAll("a[href]");
+        for (const a of list) {
+          if (typeof a.getForm !== "function") continue;
+          if (!a.data || !a.data.commandMetadata) continue;
+          if (a.closest && a.closest("[data-yga]")) continue;
+          return a;
+        }
+      }
+      return null;
+    }
+
+    // Only /channel/<UCid>… is safe to synthesise: the browseId is in the URL, so
+    // the command is complete. Any other href falls through to the older APIs.
+    function channelCommand(href) {
+      const m = /^\/channel\/(UC[0-9A-Za-z_-]{10,})(\/[^?]*)?/.exec(href || "");
+      if (!m) return null;
+      return {
+        commandMetadata: {
+          webCommandMetadata: {
+            url: href,
+            webPageType: "WEB_PAGE_TYPE_CHANNEL",
+            rootVe: 3611,
+            apiUrl: "/youtubei/v1/browse"
+          }
+        },
+        browseEndpoint: {
+          browseId: m[1],
+          canonicalBaseUrl: "/channel/" + m[1]
+        }
+      };
+    }
+
+    function endpointClick(href) {
+      const command = channelCommand(href);
+      if (!command) return false;
+      const a = endpointAnchor();
+      if (!a) return false;
+      const hrefWas = a.getAttribute("href");
+      const dataWas = a.data;
+      const ev = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0
+      });
+      a.setAttribute("href", href);
+      a.data = command;
+      try {
+        a.dispatchEvent(ev);
+      } finally {
+        // getForm() is read synchronously during dispatch, so restoring here is
+        // enough — the guide link never keeps our href.
+        a.setAttribute("href", hrefWas);
+        a.data = dataWas;
+      }
+      return true;
+    }
+
     function spaApis(from) {
       const apis = [];
       const w = window;
       const pm = ytPageManager();
       const cmd = w.ytCommand;
+
+      apis.push({ name: "endpoint-click", wait: 1500, run: (href) => endpointClick(href) });
 
       if (cmd && typeof cmd.navigate === "function") {
         const nav = cmd.navigate.bind(cmd);

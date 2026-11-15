@@ -1062,9 +1062,16 @@ window.yga = window.yga || {};
     // paint() resolves groups through yga.groups.get(); without a load the very
     // first paint marks every button unchecked even when the channel is grouped.
     await yga.groups.load();
-    // "Все подписки" (the built-in includeAllSubs profile) never carries groups,
-    // so it gets no letter button here — the picker only covers curated profiles.
-    const pickerProfiles = yga.profiles.list().filter((p) => !p.builtin && !p.includeAllSubs);
+    // A curated profile always gets a letter button. The built-in «Все подписки»
+    // used to be excluded outright on the assumption that it never carries
+    // groups — the clean-profile report 2026-11-15 disproved it: users group
+    // channels there (the widget renders those groups), and with no other
+    // profile present the filter left zero buttons, i.e. the picker vanished from
+    // every channel and watch page. It is now only hidden on request
+    // (widget.showAllSubsProfile, §8.3), and even when shown it needs groups.
+    const pickerProfiles = yga.profiles.visible(settings).filter(
+      (p) => !p.includeAllSubs || yga.groups.list(p.id).length > 0
+    );
     if (!pickerProfiles.length) {
       unmount();
       return;
@@ -1175,7 +1182,11 @@ window.yga = window.yga || {};
       let buttonOn = null; // the widget keeps its own previous; so do we
       yga.profiles.onSettingsChanged((next) => {
         const w = (next && next.widget) || {};
-        const on = (w.channelPageButton !== false) + "|" + (w.watchPageButton !== false);
+        // The two page-button switches decide whether the host exists at all;
+        // hiding «Все подписки» decides how many letters it holds (§8.3). All
+        // three need a rebuild, so they share one change key.
+        const on = (w.channelPageButton !== false) + "|" + (w.watchPageButton !== false) +
+          "|" + (w.showAllSubsProfile !== false);
         if (buttonOn === on) return;
         buttonOn = on;
         stopTracking();
