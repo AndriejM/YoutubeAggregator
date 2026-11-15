@@ -33,6 +33,8 @@ const DEFAULT_MIN_INTERVAL_MS = 90000;
 // storage (PLAN.md §12 "MV3 service worker sleeps").
 let queue = []; // { channelId, force, priority, seq, done }
 let pumpRunning = false;
+const inFlight = new Set();
+let recomputeLock = null;
 const countCache = new Map(); // channelId -> { newCount, fetchedAt, error }
 const profileCounts = new Map(); // profileId -> { newCount, errorCount, stale, at }
 let emitQueue = []; // pending bus messages, coalesced by one timer (SW→tabs)
@@ -208,23 +210,31 @@ function sameCountValue(a, b) {
 }
 
 async function recomputeAllCounts() {
-  const settings = await getSettings();
-  const filters = filtersCfg(settings);
-  const at = now();
-  const index = await chrome.storage.local.get(VIDEOS_INDEX);
-  const ids = Object.keys(index[VIDEOS_INDEX] || {});
-  const records = await loadVideoRecords(ids);
-  countCache.clear();
-  profileCounts.clear();
-  const counts = {};
-  for (const id of ids) {
-    const rec = records.get(id) || {};
-    const value = countValue(rec, filters, at);
-    countCache.set(id, value);
-    counts[id] = value;
+  if (recomputeLock) return recomputeLock;
+  recomputeLock = (async () => {
+    const settings = await getSettings();
+    const filters = filtersCfg(settings);
+    const at = now();
+    const index = await chrome.storage.local.get(VIDEOS_INDEX);
+    const ids = Object.keys(index[VIDEOS_INDEX] || {});
+    const records = await loadVideoRecords(ids);
+    countCache.clear();
+    profileCounts.clear();
+    const counts = {};
+    for (const id of ids) {
+      const rec = records.get(id) || {};
+      const value = countValue(rec, filters, at);
+      countCache.set(id, value);
+      counts[id] = value;
+    }
+    await emitToTabs({ type: "counters:counts", counts: counts });
+    return counts;
+  })();
+  try {
+    return await recomputeLock;
+  } finally {
+    recomputeLock = null;
   }
-  await emitToTabs({ type: "counters:counts", counts: counts });
-  return counts;
 }
 
 async function bumpVideosIndex(ids) {
@@ -434,11 +444,19 @@ async function pump() {
     while (queue.length) {
       queue.sort((a, b) => (b.priority - a.priority) || (a.seq - b.seq));
       const job = queue.shift();
+      if (inFlight.has(job.channelId)) {
+        job.done({ skipped: true });
+        continue;
+      }
+
+      inFlight.add(job.channelId);
       let result = { error: "aborted" };
       try {
         result = await fetchOne(job.channelId, job.force);
       } catch (e) {
         console.debug("[yga] RSS job failed for " + job.channelId + ":", e);
+      } finally {
+        inFlight.delete(job.channelId);
       }
       throttledRun = result.throttled ? throttledRun + 1 : 0;
       job.done(result);
@@ -449,7 +467,9 @@ async function pump() {
         while (queue.length) queue.shift().done({ skipped: true, throttled: true });
         break;
       }
-      if (queue.length) await new Promise((r) => setTimeout(r, REQUEST_GAP_MS));
+      if (queue.length && !result.skipped) {
+        await new Promise((r) => setTimeout(r, REQUEST_GAP_MS));
+      }
     }
   } finally {
     pumpRunning = false;
@@ -466,6 +486,7 @@ function enqueue(channelIds, opts) {
   const jobs = [];
   const pending = new Set();
   for (const job of queue) pending.add(job.channelId);
+  for (const channelId of inFlight) pending.add(channelId);
   let expected = 0;
   for (const channelId of channelIds) {
     if (!channelId || pending.has(channelId)) continue;
@@ -489,8 +510,16 @@ function enqueue(channelIds, opts) {
 async function refreshChannels(profileId, channelIds, opts) {
   const started = now();
   const enq = enqueue(channelIds, opts);
-  while (enq.jobs.length < enq.expected) await new Promise((r) => setTimeout(r, 100));
+  const deadline = now() + Math.max(60000, enq.expected * (REQUEST_GAP_MS + 15000));
+  while (enq.jobs.length < enq.expected && now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
   let errors = 0;
+  if (enq.jobs.length < enq.expected) {
+    console.debug("[yga] refreshChannels timeout", enq.jobs.length, enq.expected);
+    errors += enq.expected - enq.jobs.length;
+  }
   for (const j of enq.jobs) {
     if (j.result && j.result.error) errors++;
   }
