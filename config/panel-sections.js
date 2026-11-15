@@ -907,13 +907,14 @@ window.yga = window.yga || {};
       status.textContent = yga.i18n("dataExported");
     });
 
-    const file = el("input", "yga-panel-file", {
+    const file = el("input", "yga-panel-file yga-panel-hidden-file", {
       type: "file",
       accept: "application/json",
       "aria-label": yga.i18n("dataImport")
     });
     file.addEventListener("change", () => {
       const picked = file.files && file.files[0];
+      file.value = "";
       if (!picked) return;
       const reader = new FileReader();
       reader.onload = async () => {
@@ -944,6 +945,9 @@ window.yga = window.yga || {};
       };
       reader.readAsText(picked);
     });
+
+    const importBtn = u.button("dataImport", "yga-panel-icon");
+    importBtn.addEventListener("click", () => file.click());
 
     // PocketTube migration (PLAN.md §20): its export/dump carries
     // `{ "<group>": ["UC…"] }` plus ysc_meta order. The target profile is picked
@@ -1024,6 +1028,7 @@ window.yga = window.yga || {};
     });
 
     bar.appendChild(exportBtn);
+    bar.appendChild(importBtn);
     bar.appendChild(file);
     bar.appendChild(ptProfile);
     bar.appendChild(ptBtn);
