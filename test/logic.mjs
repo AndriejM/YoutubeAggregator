@@ -1152,6 +1152,13 @@ const chains = []; // async sections; the report waits for all of them
         anchor.stamped.data.browseEndpoint.browseId === CH1,
       JSON.stringify(anchor.stamped && { href: anchor.stamped.href, browseId: anchor.stamped.data.browseEndpoint && anchor.stamped.data.browseEndpoint.browseId })
     );
+    // User report 2026-11-15: without the Videos-tab params the router opens
+    // the channel's Home tab instead of /videos.
+    check(
+      "bridge: the browse command carries the Videos-tab params",
+      !!anchor.stamped && anchor.stamped.data.browseEndpoint.params === "EgZ2aWRlb3PyBgQKAjoA",
+      JSON.stringify(anchor.stamped && anchor.stamped.data.browseEndpoint)
+    );
     check(
       "bridge: the borrowed anchor is restored after the click",
       anchor.attrs.href === "/feed/subscriptions" &&

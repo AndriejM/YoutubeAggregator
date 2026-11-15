@@ -605,6 +605,13 @@
     function channelCommand(href) {
       const m = /^\/channel\/(UC[0-9A-Za-z_-]{10,})(\/[^?]*)?/.exec(href || "");
       if (!m) return null;
+      const endpoint = {
+        browseId: m[1],
+        canonicalBaseUrl: "/channel/" + m[1]
+      };
+      // A bare browseEndpoint opens the Home tab; the Videos tab needs its
+      // opaque params — the exact value YouTube itself stamps on /videos links.
+      if (m[2] === "/videos") endpoint.params = "EgZ2aWRlb3PyBgQKAjoA";
       return {
         commandMetadata: {
           webCommandMetadata: {
@@ -614,10 +621,7 @@
             apiUrl: "/youtubei/v1/browse"
           }
         },
-        browseEndpoint: {
-          browseId: m[1],
-          canonicalBaseUrl: "/channel/" + m[1]
-        }
+        browseEndpoint: endpoint
       };
     }
 
