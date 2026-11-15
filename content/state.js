@@ -399,6 +399,31 @@ window.yga = window.yga || {};
       return 0;
     },
 
+    // «Все новые» (PLAN.md backlog 1): ask the worker for the new-video list of
+    // this profile and let it open the playlist tab (open=true) — the worker
+    // owns the video cache, and only it can open a tab without losing the
+    // click gesture. The rendered widget list is passed as the channel scope so
+    // the opened playlist matches the counters the user sees. Returns the worker
+    // response ({ids,total,limit,url}) or null.
+    async watchAll(profileId, channelIds, visits) {
+      if (!profileId) return null;
+      try {
+        const msg = {
+          type: "counters:watchAll",
+          profileId: profileId,
+          open: true
+        };
+        if (Array.isArray(channelIds) && channelIds.length) msg.channelIds = channelIds;
+        if (visits && typeof visits === "object") msg.visits = visits;
+        const res = await chrome.runtime.sendMessage(msg);
+        if (res && res.ok) return res;
+        if (res && res.error) console.debug("[yga] watchAll:", res.error);
+      } catch (e) {
+        console.warn("[yga] watchAll failed:", e);
+      }
+      return null;
+    },
+
     getAggregate() {
       return aggregate;
     },

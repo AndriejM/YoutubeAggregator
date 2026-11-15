@@ -50,6 +50,7 @@ export function makeSandbox() {
   const alarms = new Map();
   const listeners = { message: [], alarm: [], installed: [], startup: [] };
   const bus = []; // runtime.sendMessage payloads (bus messages via alarms)
+  const opened = []; // chrome.tabs.create payloads («Все новые» opens a tab)
   let fetchCalls = [];
   let fetchResponder = function () {
     return { status: 200, body: fixture, etag: "etag-v1" };
@@ -104,7 +105,13 @@ export function makeSandbox() {
       },
       onAlarm: { addListener: (fn) => listeners.alarm.push(fn) }
     },
-    i18n: { getMessage: () => "" }
+    i18n: { getMessage: () => "" },
+    tabs: {
+      create: async (opts) => {
+        opened.push(opts || {});
+        return { id: opened.length, url: (opts || {}).url || "" };
+      }
+    }
   };
 
   const realSetTimeout = setTimeout;
@@ -147,6 +154,7 @@ export function makeSandbox() {
     storage,
     alarms,
     bus,
+    opened,
     listeners,
     fetchCalls,
     setResponder(fn) {

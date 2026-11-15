@@ -611,6 +611,57 @@ env.sandbox.chrome.storage.local
       !!header && header.querySelector(".yga-refresh").textContent === "",
       JSON.stringify(header && header.querySelector(".yga-refresh").textContent)
     );
+
+    // Backlog 1: «Все новые» — the play button sits between the total chip and
+    // the refresh and hands the click to the worker, which owns the video cache
+    // and opens the tab itself (a content-side window.open after an await is
+    // popup-blocked).
+    check(
+      "watchAll: header carries the play button between the chip and the refresh",
+      !!header &&
+        !!header.querySelector(".yga-watch-all") &&
+        header.children.indexOf(header.querySelector(".yga-watch-all")) ===
+          header.children.indexOf(header.querySelector(".yga-total")) + 1 &&
+        header.children.indexOf(header.querySelector(".yga-refresh")) ===
+          header.children.indexOf(header.querySelector(".yga-watch-all")) + 1,
+      JSON.stringify(header && header.children.map((c) => c.className))
+    );
+    const play = header && header.querySelector(".yga-watch-all");
+    check("watchAll: play button is icon-only", !!play && play.textContent === "");
+    yga.counters.updateTotal(mounted);
+    check(
+      "watchAll: button is enabled while the profile has new videos",
+      !!play && !play.disabled && !play.classList.contains("yga-hidden") && !!play.title,
+      JSON.stringify(play && { disabled: play.disabled, cls: play.className, title: play.title })
+    );
+    let watchArgs = null;
+    const origWatchAll = yga.state.watchAll;
+    yga.state.watchAll = async function (profileId, channelIds, visits) {
+      watchArgs = { profileId, channelIds, visits };
+      return origWatchAll.apply(this, arguments);
+    };
+    const openedBefore = env.opened.length;
+    play.dispatchEvent({ type: "click" });
+    await flush(40);
+    yga.state.watchAll = origWatchAll;
+    check(
+      "watchAll: click sends the rendered channel scope to the worker",
+      !!watchArgs &&
+        !!watchArgs.profileId &&
+        Array.isArray(watchArgs.channelIds) &&
+        watchArgs.channelIds.length > 0 &&
+        !!watchArgs.visits &&
+        Object.keys(watchArgs.visits).length === watchArgs.channelIds.length,
+      JSON.stringify(watchArgs)
+    );
+    check(
+      "watchAll: click makes the worker open the playlist tab",
+      env.opened.length === openedBefore + 1 &&
+        /^https:\/\/www\.youtube\.com\/(watch\?v=[A-Za-z0-9_-]{11}|watch_videos\?video_ids=[A-Za-z0-9_-]{11}(,[A-Za-z0-9_-]{11})*)$/.test(
+          (env.opened[openedBefore] || {}).url || ""
+        ),
+      JSON.stringify(env.opened.slice(openedBefore))
+    );
     check(
       "stage8: no rename/delete profile buttons in the widget",
       !mounted.querySelector(".yga-profile-rename") && !mounted.querySelector(".yga-profile-del")

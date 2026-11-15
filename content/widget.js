@@ -288,8 +288,9 @@ window.yga = window.yga || {};
     const widget = el("div", "yga-widget", { "data-yga": "widget" });
 
     // Stage 8: the header carries the title and the view controls. counters.js
-    // inserts the total chip and the icon-only refresh button before the gear,
-    // so the order is title → total → refresh → gear → ▲ → ▼. The profile
+    // inserts the total chip, the «Все новые» play button and the icon-only
+    // refresh button before the gear, so the order is
+    // title → total → ▶ → refresh → gear → ▲ → ▼. The profile
     // combobox never fit this tight row — it gets its own line below.
     const header = el("div", "yga-header");
 

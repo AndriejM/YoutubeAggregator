@@ -25,6 +25,11 @@ const MAX_ENTRIES_KEPT = 20; // RSS ships ~15 (PLAN.md §6); watched flags need 
 // Consecutive throttled feeds end the pass: the rest of the queue would only
 // hit the same 429 wall and burn the retry budget of every channel in it.
 const THROTTLE_STOP = 3;
+// «Все новые» (PLAN.md backlog 1): how many ids one /watch_videos URL carries.
+// 50 ids ≈ 600 characters, well inside Chrome's URL budget; 100 is the ceiling
+// the settings field accepts.
+const DEFAULT_WATCH_ALL_LIMIT = 50;
+const MAX_WATCH_ALL_LIMIT = 100;
 
 // Freshness floor if yga:settings is missing or unreadable.
 const DEFAULT_MIN_INTERVAL_MS = 90000;
@@ -98,6 +103,16 @@ function videoKey(id) {
   return VIDEO_PREFIX + id;
 }
 
+// «Все новые» (PLAN.md backlog 1): the id cap lives with the other widget
+// settings; anything out of range falls back to the default.
+function watchAllCfg(settings) {
+  const w = (settings && settings.widget) || {};
+  const n = Number(w.watchAllLimit);
+  return Number.isFinite(n) && n >= 1 && n <= MAX_WATCH_ALL_LIMIT
+    ? Math.floor(n)
+    : DEFAULT_WATCH_ALL_LIMIT;
+}
+
 async function loadVideoRecords(ids) {
   const out = new Map();
   const CHUNK = 900; // storage.local.get stays responsive on 1000+ keys
@@ -157,7 +172,7 @@ function computeCounts(record, filters, at) {
   const entries = (record && record.entries) || [];
   let newCount = 0;
   for (const e of entries) {
-    if (!e.watched && entryVisible(e, filters, at)) newCount++;
+    if (!e.watched && e.videoId && entryVisible(e, filters, at)) newCount++;
   }
   return newCount;
 }
@@ -171,7 +186,7 @@ function unwatchedAt(record, filters, at) {
   const entries = (record && record.entries) || [];
   const out = [];
   for (const e of entries) {
-    if (!e.watched && e.publishedAt && entryVisible(e, filters, at)) out.push(e.publishedAt);
+    if (!e.watched && e.publishedAt && e.videoId && entryVisible(e, filters, at)) out.push(e.publishedAt);
   }
   return out.sort((a, b) => b - a);
 }
@@ -196,6 +211,53 @@ function countSince(record, lastVisitAt, filters, at) {
   let n = 0;
   for (const t of at2) if (t > lastVisitAt) n++;
   return n;
+}
+
+// «Все новые» (PLAN.md backlog 1): the ids of every new video of ONE profile,
+// newest first, ready for /watch_videos?video_ids=. Pure on purpose — records,
+// comp and filters come from the caller, so the ordering, the lastVisitAt cut,
+// the filters and the cap are testable without storage. `records` is the Map
+// loadVideoRecords returns; a plain id→record object is accepted too.
+// Returns { ids, total, limit }: `total` is the uncut count, so the caller can
+// say «shown 50 of 187» without a second pass.
+function newVideoIds(records, comp, filters, at, limit, visits) {
+  const found = [];
+  const visitOf = (channelId) => {
+    const fromView = visits && visits[channelId];
+    if (Number.isFinite(fromView)) return fromView;
+    return ((comp || {})[channelId] || {}).lastVisitAt || 0;
+  };
+  const collect = (record, channelId) => {
+    const lastVisitAt = visitOf(channelId);
+    const entries = (record && record.entries) || [];
+    for (const e of entries) {
+      if (!e || e.watched || !e.publishedAt || !e.videoId) continue;
+      if (!entryVisible(e, filters, at)) continue;
+      if (e.publishedAt <= lastVisitAt) continue;
+      found.push({ id: e.videoId, publishedAt: e.publishedAt });
+    }
+  };
+  if (records && typeof records.forEach === "function") records.forEach(collect);
+  else for (const channelId in records || {}) collect(records[channelId], channelId);
+  found.sort((a, b) => b.publishedAt - a.publishedAt);
+  const seen = new Set();
+  const ids = [];
+  for (const f of found) {
+    if (seen.has(f.id)) continue;
+    seen.add(f.id);
+    ids.push(f.id);
+  }
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
+  return { ids: cap ? ids.slice(0, cap) : ids, total: ids.length, limit: cap };
+}
+
+// One new video goes straight to the watch page; several become a YouTube
+// auto-playlist. Video ids are [A-Za-z0-9_-]{11}, so the encoding is a
+// formality — the URL stays readable in the address bar either way.
+function watchAllUrl(ids) {
+  if (!ids || !ids.length) return "";
+  if (ids.length === 1) return "https://www.youtube.com/watch?v=" + encodeURIComponent(ids[0]);
+  return "https://www.youtube.com/watch_videos?video_ids=" + ids.map(encodeURIComponent).join(",");
 }
 
 // A feed refresh can rotate entries while newCount stays the same (one video
@@ -648,6 +710,33 @@ function handleCounters(msg) {
           aggregate: profileCounts.get(msg.profileId) || null,
           lastRun: lastRun
         };
+      })();
+
+    // «Все новые» (PLAN.md backlog 1): the id list of every new video of one
+    // profile, built from the RSS cache — no YouTube request. open=true lets
+    // the worker create the tab itself: a content-side window.open after an
+    // await has lost the user gesture and gets popup-blocked, while an
+    // extension-initiated chrome.tabs.create is never blocked.
+    case "counters:watchAll":
+      return (async () => {
+        const profileId = msg.profileId;
+        if (!profileId) return { ok: false, error: "badArgs" };
+        const [data, settings] = await Promise.all([profileData(profileId), getSettings()]);
+        if (!data) return { ok: false, error: "unknownProfile" };
+        // The widget header is the source of truth for what the user sees as
+        // "new" for this profile. When the content world sends its rendered
+        // channel set, use it instead of re-deriving membership here: a stale
+        // worker-side subs/composition snapshot otherwise opens only the subset
+        // it happens to know about (user report 2026-11-15: 15 visible new
+        // videos, but one tab with one video).
+        const ids = Array.isArray(msg.channelIds) && msg.channelIds.length
+          ? msg.channelIds
+          : data.ids;
+        const records = await loadVideoRecords(ids);
+        const res = newVideoIds(records, data.comp, filtersCfg(settings), now(), watchAllCfg(settings), msg.visits);
+        const url = watchAllUrl(res.ids);
+        if (msg.open && url) await chrome.tabs.create({ url: url });
+        return { ok: true, ids: res.ids, total: res.total, limit: res.limit, url: url };
       })();
 
     case "counters:init":

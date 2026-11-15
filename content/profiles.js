@@ -80,7 +80,7 @@ window.yga = window.yga || {};
       activeProfileId: BUILTIN_ID,
       refresh: { mode: "onOpen", scheduled: { enabled: false, periodInMinutes: 240, maxChannelsPerRun: 60 }, batch: 12, minIntervalMs: 90000 },
       filters: { hideShorts: false, hideLive: false, maxAgeDays: 0 },
-      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true, watchPageButton: true, showAllSubsProfile: true },
+      widget: { position: "afterSubscriptions", widthPx: 300, showCounts: true, showZeroCount: false, sort: "activity", hideWatched: false, compact: false, hideEmptyGroups: false, channelPageButton: true, watchPageButton: true, showAllSubsProfile: true, watchAllLimit: 50 },
       theme: { followYouTube: true, accent: "#c00" }
     };
   }

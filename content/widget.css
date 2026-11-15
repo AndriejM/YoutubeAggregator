@@ -271,6 +271,38 @@
   opacity: 0.6;
 }
 
+/* Backlog 1: «Все новые» — icon-only play button between the total chip and
+   the refresh. Accent-coloured while there is something to play; hidden at
+   zero by .yga-hidden, like the chip itself. */
+.yga-watch-all {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  color: var(--yga-accent);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.yga-watch-all:hover {
+  background: var(--yga-hover);
+}
+
+.yga-watch-all:focus-visible {
+  outline: 2px solid var(--yga-accent);
+  outline-offset: -2px;
+}
+
+.yga-watch-all:disabled {
+  cursor: default;
+  color: var(--yga-fg-dim);
+}
+
 /* YT-override: spin must survive contain: layout style on the widget */
 .yga-refresh.yga-busy svg {
   animation: yga-spin 0.9s linear infinite;

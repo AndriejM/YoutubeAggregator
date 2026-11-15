@@ -95,6 +95,14 @@
     "message": "New videos",
     "description": "Prefix of the footer total tooltip"
   },
+  "watchAllNew": {
+    "message": "Play all {count} new videos",
+    "description": "Tooltip of the «Все новые» play button in the widget header"
+  },
+  "watchAllTruncated": {
+    "message": "Shown {shown} of {total} new videos",
+    "description": "Tooltip of the play button when the playlist is cut to the id limit"
+  },
   "countersStale": {
     "message": "counters out of date",
     "description": "Tooltip suffix when caches are older than 24 hours"
@@ -450,6 +458,14 @@
   "widgetWidthHint": {
     "message": "The guide column keeps its own width; this only caps the widget.",
     "description": "Hint of the widget width field"
+  },
+  "widgetWatchAllLimit": {
+    "message": "«Play all» id limit",
+    "description": "Label of the field capping the playlist opened by the play button"
+  },
+  "widgetWatchAllLimitHint": {
+    "message": "How many videos the «Play all» playlist carries; the newest ones win.",
+    "description": "Hint of the «Play all» id limit field"
   },
   "widgetShowCounts": {
     "message": "Show new-video counters",

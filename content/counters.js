@@ -50,6 +50,75 @@ window.yga = window.yga || {};
     return text;
   }
 
+  // «Все новые» (PLAN.md backlog 1): one header button that opens every new
+  // video of the active profile as a YouTube auto-playlist. The worker owns the
+  // video cache (the content world only sees timestamps), so the id list is
+  // fetched on click; the total chip stays the source of the enabled state.
+  const WATCH_ALL_LIMIT_DEFAULT = 50;
+  const PLAY_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">' +
+    '<path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+  let watchAllLimit = WATCH_ALL_LIMIT_DEFAULT;
+  let unsubWatchAllSettings = null;
+
+  function applyWatchAllSettings(s) {
+    const n = Number(((s || {}).widget || {}).watchAllLimit);
+    watchAllLimit = Number.isFinite(n) && n >= 1 ? Math.floor(n) : WATCH_ALL_LIMIT_DEFAULT;
+  }
+
+  // The cap is known before the click (settings + chip), so the tooltip can
+  // promise «shown 50 of 187» without asking the worker first.
+  function watchAllTitle(agg) {
+    const total = agg ? agg.newCount : 0;
+    if (watchAllLimit && total > watchAllLimit) {
+      return yga.i18n("watchAllTruncated")
+        .replace("{shown}", String(watchAllLimit))
+        .replace("{total}", String(total));
+    }
+    return yga.i18n("watchAllNew").replace("{count}", String(total));
+  }
+
+  function updateWatchAll(widget, agg) {
+    const header = widget && widget.querySelector(".yga-header");
+    const btn = header && header.querySelector(".yga-watch-all");
+    if (!btn) return;
+    const on = !!(agg && agg.newCount);
+    btn.classList.toggle("yga-hidden", !on);
+    btn.disabled = !on;
+    const text = watchAllTitle(on ? agg : null);
+    btn.title = text;
+    btn.setAttribute("aria-label", text);
+  }
+
+  async function openWatchAll(widget) {
+    const profileId = yga.profiles && yga.profiles.lastActiveId();
+    const header = widget && widget.querySelector(".yga-header");
+    const btn = header && header.querySelector(".yga-watch-all");
+    if (!profileId || !btn || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      let channelIds;
+      let visits;
+      try {
+        const list = await yga.state.getVisibleSubs();
+        const seen = new Set();
+        channelIds = [];
+        visits = {};
+        for (const s of list || []) {
+          if (!s || !s.channelId || seen.has(s.channelId)) continue;
+          seen.add(s.channelId);
+          channelIds.push(s.channelId);
+          visits[s.channelId] = s.lastVisitAt || 0;
+        }
+      } catch (e) {
+        console.debug("[yga] watchAll visible scope failed:", e);
+      }
+      await yga.state.watchAll(profileId, channelIds, visits);
+    } finally {
+      if (widget.isConnected) btn.disabled = false;
+    }
+  }
+
   function localAggregate() {
     const list = yga.widget && yga.widget.lastRendered && yga.widget.lastRendered();
     if (!list) return null;
@@ -84,6 +153,7 @@ window.yga = window.yga || {};
     total.title = totalTitle(agg);
     total.classList.toggle("yga-hidden", !text);
     total.classList.toggle("yga-stale", !!(agg && agg.stale));
+    updateWatchAll(widget, agg);
   }
 
   async function resetAll(widget) {
@@ -113,7 +183,8 @@ window.yga = window.yga || {};
 
     // Stage 8: the total chip and the refresh button live in the widget header
     // (to the right of the title), not in a separate toolbar row. The refresh
-    // button is icon-only — the header is tight on space.
+    // button is icon-only — the header is tight on space. Backlog 1 added the
+    // «Все новые» play button between the chip and the refresh.
     ensureToolbar(widget) {
       const header = widget.querySelector(".yga-header");
       if (!header) return;
@@ -128,6 +199,14 @@ window.yga = window.yga || {};
           resetAll(widget);
         });
         header.insertBefore(total, before);
+      }
+      if (!header.querySelector(".yga-watch-all")) {
+        const play = document.createElement("button");
+        play.className = "yga-watch-all yga-hidden";
+        play.type = "button";
+        play.innerHTML = PLAY_SVG; // static markup, no YouTube data (PLAN.md §12)
+        play.addEventListener("click", () => openWatchAll(widget));
+        header.insertBefore(play, before);
       }
       if (!header.querySelector(".yga-refresh")) {
         const btn = document.createElement("button");
@@ -174,6 +253,19 @@ window.yga = window.yga || {};
       yga.counters.ensureToolbar(widget);
       if (unsubCounter) unsubCounter();
       if (unsubComp) unsubComp();
+      // The id cap of «Все новые» is a widget setting: the tooltip must follow
+      // a panel edit without a reload, like every other setting (stage 4).
+      if (unsubWatchAllSettings) unsubWatchAllSettings();
+      if (yga.profiles) {
+        unsubWatchAllSettings = yga.profiles.onSettingsChanged((s) => {
+          applyWatchAllSettings(s);
+          updateTotal(widget);
+        });
+        yga.profiles.getSettings().then((s) => {
+          applyWatchAllSettings(s);
+          if (widget.isConnected) updateTotal(widget);
+        }).catch(() => {});
+      }
       if (rerenderTimer) {
         clearTimeout(rerenderTimer);
         rerenderTimer = 0;

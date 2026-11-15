@@ -1324,4 +1324,142 @@ const chains = []; // async sections; the report waits for all of them
   })().catch((e) => failures.push("browse continuation section crashed: " + e)));
 }
 
+// --- 7. «Все новые» (PLAN.md backlog 1): id list + playlist URL ------------
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+  const newVideoIds = env.sandbox.newVideoIds;
+  const watchAllUrl = env.sandbox.watchAllUrl;
+  const rec = (...entries) => ({ entries: entries });
+  const e = (id, publishedAt, extra) => Object.assign({ videoId: id, publishedAt: publishedAt }, extra || {});
+
+  check("watchAll: pure function is exposed", typeof newVideoIds === "function" && typeof watchAllUrl === "function");
+
+  const records = new Map([
+    ["A", rec(e("a1", 100), e("a2", 300))],
+    ["B", rec(e("b1", 200, { watched: true }), e("b2", 400, { kind: "shorts" }))]
+  ]);
+  const comp = { A: { lastVisitAt: 0 }, B: { lastVisitAt: 150 } };
+
+  const all = newVideoIds(records, comp, {}, 1000, 0);
+  check("watchAll: newest first across channels", all.ids.join(",") === "b2,a2,a1", all.ids.join(","));
+  check("watchAll: watched entry skipped", all.ids.indexOf("b1") < 0);
+  check("watchAll: lastVisitAt is a strict cut", all.ids.indexOf("a1") >= 0);
+
+  const cut = newVideoIds(records, { A: { lastVisitAt: 100 }, B: {} }, {}, 1000, 0);
+  check("watchAll: entry at lastVisitAt is not new", cut.ids.indexOf("a1") < 0, cut.ids.join(","));
+
+  const noShorts = newVideoIds(records, comp, { hideShorts: true }, 1000, 0);
+  check("watchAll: hideShorts applies", noShorts.ids.join(",") === "a2,a1", noShorts.ids.join(","));
+
+  const capped = newVideoIds(records, comp, {}, 1000, 2);
+  check("watchAll: cap keeps the newest", capped.ids.join(",") === "b2,a2", capped.ids.join(","));
+  check("watchAll: total is the uncut count", capped.total === 3 && capped.limit === 2, JSON.stringify(capped));
+
+  const asObject = newVideoIds({ A: rec(e("a1", 100)) }, {}, {}, 1000, 0);
+  check("watchAll: plain record map accepted", asObject.ids.join(",") === "a1", asObject.ids.join(","));
+
+  check("watchAll: empty list has no url", watchAllUrl([]) === "");
+  check("watchAll: one id goes to /watch", watchAllUrl(["abcdefghijk"]) === "https://www.youtube.com/watch?v=abcdefghijk");
+  check(
+    "watchAll: many ids become watch_videos",
+    watchAllUrl(["a1111111111", "b2222222222"]) ===
+      "https://www.youtube.com/watch_videos?video_ids=a1111111111,b2222222222",
+    watchAllUrl(["a1111111111", "b2222222222"])
+  );
+}
+
+{
+  const env = makeSandbox();
+  loadInto(env);
+  const T0 = Date.parse("2026-11-08T09:00:00.000Z");
+  const vid = (n) => "v" + String(n).padStart(10, "0");
+
+  chains.push(env.sandbox.chrome.storage.local
+    .set({
+      "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
+      "yga:account": { accountKey: "UCme" },
+      "yga:subs:UCme": [{ c: CH1, t: "One" }, { c: CH2, t: "Two" }],
+      "yga:profile-channels:p_1": {
+        [CH1]: { addedAt: 1, lastVisitAt: 0 },
+        [CH2]: { addedAt: 1, lastVisitAt: T0 + 3000 }
+      },
+      ["yga:videos:" + CH1]: {
+        entries: [
+          { videoId: vid(2), publishedAt: T0 + 1000, kind: "video", watched: false },
+          { videoId: vid(1), publishedAt: T0, kind: "video", watched: false }
+        ],
+        fetchedAt: T0, error: 0
+      },
+      ["yga:videos:" + CH2]: {
+        entries: [{ videoId: vid(3), publishedAt: T0 + 2000, kind: "video", watched: false }],
+        fetchedAt: T0, error: 0
+      }
+    })
+    .then(() => env.send({ type: "counters:watchAll", profileId: "p_1", open: true }))
+    .then(async (res) => {
+      check("watchAll: worker answers", !!res && res.ok === true, JSON.stringify(res));
+      check("watchAll: newest first, other profile visits respected",
+        res && res.ids.join(",") === vid(2) + "," + vid(1), res && res.ids.join(","));
+      check("watchAll: channel past its lastVisitAt contributes nothing",
+        res && res.ids.indexOf(vid(3)) < 0, res && res.ids.join(","));
+      check("watchAll: open=true creates the tab in the worker",
+        env.opened.length === 1 && env.opened[0].url === res.url, JSON.stringify(env.opened));
+      check("watchAll: many ids open watch_videos",
+        res && res.url.indexOf("https://www.youtube.com/watch_videos?video_ids=") === 0, res && res.url);
+
+      // A cap in settings trims the list but still reports the full total.
+      await env.sandbox.chrome.storage.local.set({ "yga:settings": { version: 1, activeProfileId: "p_1", widget: { watchAllLimit: 1 } } });
+      const capped = await env.send({ type: "counters:watchAll", profileId: "p_1" });
+      check("watchAll: settings cap applies", capped && capped.ids.join(",") === vid(2), capped && capped.ids.join(","));
+      check("watchAll: total survives the cap", capped && capped.total === 2 && capped.limit === 1, JSON.stringify(capped));
+      check("watchAll: open omitted creates no tab", env.opened.length === 1, String(env.opened.length));
+
+      // Exactly one new video → straight to the watch page, no playlist.
+      await env.sandbox.chrome.storage.local.set({
+        "yga:settings": { version: 1, activeProfileId: "p_1" },
+        "yga:profile-channels:p_1": {
+          [CH1]: { addedAt: 1, lastVisitAt: T0 },
+          [CH2]: { addedAt: 1, lastVisitAt: T0 + 3000 }
+        }
+      });
+      const single = await env.send({ type: "counters:watchAll", profileId: "p_1", open: true });
+      check("watchAll: a single new video opens /watch",
+        single && single.url === "https://www.youtube.com/watch?v=" + vid(2), single && single.url);
+
+      // Regression: the worker-side membership snapshot can lag behind the
+      // rendered widget. The click now carries the visible channel set and its
+      // per-channel visits, so the playlist matches the counters the user sees.
+      await env.sandbox.chrome.storage.local.set({
+        "yga:subs:UCme": [{ c: CH1, t: "One" }],
+        "yga:profile-channels:p_1": { [CH1]: { addedAt: 1, lastVisitAt: T0 + 3000 } }
+      });
+      const visible = await env.send({
+        type: "counters:watchAll",
+        profileId: "p_1",
+        channelIds: [CH1, CH2],
+        visits: { [CH1]: 0, [CH2]: 0 }
+      });
+      check("watchAll: rendered channelIds override stale worker membership",
+        visible && visible.ids.join(",") === vid(3) + "," + vid(2) + "," + vid(1),
+        visible && visible.ids.join(","));
+      check("watchAll: rendered visits override stale worker visits",
+        visible && visible.ids.indexOf(vid(1)) >= 0, visible && visible.ids.join(","));
+
+      const dup = await env.send({
+        type: "counters:watchAll",
+        profileId: "p_1",
+        channelIds: [CH1, CH1],
+        visits: { [CH1]: 0 }
+      });
+      check("watchAll: duplicate video ids are collapsed",
+        dup && dup.ids.join(",") === vid(2) + "," + vid(1), dup && dup.ids.join(","));
+
+      const bad = await env.send({ type: "counters:watchAll", profileId: "p_missing" });
+      check("watchAll: unknown profile is refused", bad && bad.ok === false && bad.error === "unknownProfile", JSON.stringify(bad));
+    })
+    .catch((e) => failures.push("watchAll section crashed: " + e)));
+}
+
 Promise.all(chains).then(() => report());

@@ -776,6 +776,17 @@ window.yga = window.yga || {};
     });
     host.appendChild(u.field("widgetWidth", width, "widgetWidthHint"));
 
+    // Backlog 1: how many ids «Все новые» puts into one /watch_videos URL.
+    const watchAllLimit = u.number(Number(w.watchAllLimit) || 50, {
+      min: "1", max: "100", step: "1"
+    });
+    watchAllLimit.addEventListener("change", async () => {
+      const value = Math.min(100, Math.max(1, Math.floor(Number(watchAllLimit.value) || 50)));
+      watchAllLimit.value = String(value);
+      await u.save("widget.watchAllLimit", value);
+    });
+    host.appendChild(u.field("widgetWatchAllLimit", watchAllLimit, "widgetWatchAllLimitHint"));
+
     const showCounts = el("input", "yga-panel-check", { type: "checkbox" });
     showCounts.checked = w.showCounts !== false;
     showCounts.addEventListener("change", async () => {
