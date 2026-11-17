@@ -45,12 +45,36 @@ export const flush = async (n) => {
 
 // --- chrome stubs -------------------------------------------------------
 
+// Enough of Chrome's match-pattern grammar for the patterns this extension
+// declares (https://*.youtube.com/*): scheme, optional wildcard host, path.
+function urlMatches(pattern, url) {
+  if (!pattern || pattern === "<all_urls>") return true;
+  const esc = (s) => s.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const at = pattern.indexOf("://");
+  if (at < 0) return false;
+  const scheme = pattern.slice(0, at) === "*" ? "https?" : esc(pattern.slice(0, at));
+  const rest = pattern.slice(at + 3);
+  const slash = rest.indexOf("/");
+  const host = slash < 0 ? rest : rest.slice(0, slash);
+  const path = slash < 0 ? "/*" : rest.slice(slash);
+  const hostRe = host === "*" ? "[^/]+" : host.startsWith("*.") ? "(?:.+\\.)?" + esc(host.slice(2)) : esc(host);
+  const pathRe = esc(path).replace(/\*/g, ".*");
+  return new RegExp("^" + scheme + "://" + hostRe + pathRe + "$").test(url);
+}
+
 export function makeSandbox() {
   const storage = new Map(); // key -> value
   const alarms = new Map();
   const listeners = { message: [], alarm: [], installed: [], startup: [] };
-  const bus = []; // runtime.sendMessage payloads (bus messages via alarms)
+  const bus = []; // payloads the worker broadcast to the tabs
   const opened = []; // chrome.tabs.create payloads («Все новые» opens a tab)
+  const tabs = []; // open tabs: { id, url, listeners } — listeners = content-script world
+  function addTab(url) {
+    const tab = { id: tabs.length + 1, url: url || "https://www.youtube.com/", listeners: [] };
+    tabs.push(tab);
+    return tab;
+  }
+  addTab("https://www.youtube.com/feed/subscriptions");
   let fetchCalls = [];
   let fetchResponder = function () {
     return { status: 200, body: fixture, etag: "etag-v1" };
@@ -110,6 +134,33 @@ export function makeSandbox() {
       create: async (opts) => {
         opened.push(opts || {});
         return { id: opened.length, url: (opts || {}).url || "" };
+      },
+      // Chrome only exposes tabs the extension has host access to; the worker
+      // queries by match pattern, so the stub has to honour the pattern.
+      query: async (info) => {
+        const pattern = info && info.url;
+        return tabs
+          .filter((t) => urlMatches(pattern, t.url))
+          .map((t) => ({ id: t.id, url: t.url }));
+      },
+      // Only a tab whose content script registered an onMessage listener can
+      // receive; anything else rejects exactly like Chrome's
+      // "Could not establish connection. Receiving end does not exist."
+      sendMessage: async (tabId, msg) => {
+        const tab = tabs.find((t) => t.id === tabId);
+        if (!tab) throw new Error("No tab with id: " + tabId);
+        bus.push(msg);
+        if (!tab.listeners.length) throw new Error("Could not establish connection. Receiving end does not exist.");
+        // A throwing content listener must not reject the sender's promise,
+        // same as in Chrome — surface it on the console instead.
+        for (const fn of tab.listeners.slice()) {
+          try {
+            fn(msg, { id: tabId }, () => {});
+          } catch (e) {
+            console.error("[harness] content onMessage listener threw:", e);
+          }
+        }
+        return {};
       }
     }
   };
@@ -155,6 +206,8 @@ export function makeSandbox() {
     alarms,
     bus,
     opened,
+    tabs,
+    addTab,
     listeners,
     fetchCalls,
     setResponder(fn) {

@@ -633,16 +633,13 @@ const chains = []; // async sections; the report waits for all of them
   loadInto(env);
 
   const shared = env.storage;
-  const content = { storageChanged: [], message: [] };
+  const content = { storageChanged: [], received: [] };
   const changes = [];
 
-  // The worker's bus (chrome.runtime.sendMessage from the SW) must arrive in
-  // the content world's onMessage listeners, like in Chrome.
-  const wsend = env.sandbox.chrome.runtime.sendMessage;
-  env.sandbox.chrome.runtime.sendMessage = async (msg) => {
-    content.message.push(msg);
-    return wsend(msg);
-  };
+  // The worker's bus goes out through chrome.tabs.sendMessage — runtime.sendMessage
+  // from the SW never reaches a content script. Attach the content world's
+  // listeners to the open YouTube tab so delivery is modelled as Chrome does it.
+  const tab = env.tabs[0];
 
   function record(key, oldValue) {
     changes.push({ key: key, oldValue: oldValue, newValue: shared.has(key) ? clone(shared.get(key)) : undefined });
@@ -690,7 +687,12 @@ const chains = []; // async sections; the report waits for all of them
       onChanged: { addListener: (fn) => content.storageChanged.push(fn) }
     },
     runtime: {
-      onMessage: { addListener: (fn) => content.message.push(fn) },
+      onMessage: {
+        addListener: (fn) => tab.listeners.push((msg, sender, sendResponse) => {
+          content.received.push(msg);
+          return fn(msg, sender, sendResponse);
+        })
+      },
       sendMessage: async (msg) => env.send(msg)
     },
     i18n: { getMessage: (k) => k }
@@ -780,7 +782,7 @@ const chains = []; // async sections; the report waits for all of them
       // A worker-side refresh must not resurrect the reset count (bus path).
       await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
       await deliver();
-      const msg = content.message.filter((m) => m && m.type === "counters:counts");
+      const msg = content.received.filter((m) => m && m.type === "counters:counts");
       check("content: counts bus delivered", msg.length > 0, String(msg.length));
       list = await c.state.getVisibleSubs();
       check(
@@ -1461,5 +1463,62 @@ const chains = []; // async sections; the report waits for all of them
     })
     .catch((e) => failures.push("watchAll section crashed: " + e)));
 }
+
+// --- forced refresh must not be swallowed by an automatic refresh ----------
+// 2026-11-17 bug: the header ↻ button set force=true, but content/state.js
+// guarded every refreshCounters() call with a per-tab countsPending flag. While
+// the page-load refresh was still in flight, the button returned immediately
+// and looked dead.
+chains.push((async () => {
+  const messages = [];
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+    Math,
+    JSON,
+    Promise,
+    Object,
+    Array,
+    Map,
+    Set,
+    String,
+    Number,
+    RegExp,
+    chrome: {
+      storage: {
+        local: {
+          get: async () => ({}),
+          set: async () => {},
+          remove: async () => {}
+        },
+        onChanged: { addListener: () => {} }
+      },
+      runtime: {
+        onMessage: { addListener: () => {} },
+        sendMessage: async (msg) => {
+          messages.push(msg);
+          if (msg.force) return { ok: true, aggregate: null };
+          return new Promise(() => {});
+        }
+      }
+    },
+    yga: { i18n: (k) => k }
+  };
+  sandbox.globalThis = sandbox;
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(read("content/state.js"), sandbox, { filename: "state.js" });
+
+  sandbox.yga.state.refreshCounters();
+  await flush(1);
+  const forced = await sandbox.yga.state.refreshCounters({ force: true });
+  check(
+    "state: forced refresh bypasses a pending automatic refresh",
+    forced && forced.ok === true && messages.length === 2 && messages[1].force === true,
+    JSON.stringify(messages)
+  );
+})().catch((e) => failures.push("forced refresh guard section crashed: " + e)));
 
 Promise.all(chains).then(() => report());

@@ -345,14 +345,13 @@ loadInto(env);
 env.setResponder(() => ({ status: 200, body: feedWith(16), etag: "etag-dom" }));
 
 const shared = env.storage;
-const content = { storageChanged: [], message: [] };
+const content = { storageChanged: [], received: [] };
 const changes = [];
 
-const wsend = env.sandbox.chrome.runtime.sendMessage;
-env.sandbox.chrome.runtime.sendMessage = async (msg) => {
-  content.message.push(msg);
-  return wsend(msg);
-};
+// The worker's bus goes out through chrome.tabs.sendMessage, so the content
+// world must be attached to an open tab — that is what makes the live repaint
+// path (bus → state → counters → widget) actually run here.
+const tab = env.tabs[0];
 const wlocal = env.sandbox.chrome.storage.local;
 const wset = wlocal.set;
 wlocal.set = async function (payload) {
@@ -395,7 +394,12 @@ globalThis.chrome = {
     onChanged: { addListener: (fn) => content.storageChanged.push(fn) }
   },
   runtime: {
-    onMessage: { addListener: (fn) => content.message.push(fn) },
+    onMessage: {
+      addListener: (fn) => tab.listeners.push((msg, sender, sendResponse) => {
+        content.received.push(msg);
+        return fn(msg, sender, sendResponse);
+      })
+    },
     sendMessage: async (msg) => env.send(msg),
     getURL: (p) => "chrome-extension://test/" + p
   },
@@ -503,6 +507,20 @@ env.sandbox.chrome.storage.local
       !!row && row.classList.contains("spf-link") && row.classList.contains("yt-simple-endpoint")
     );
     check("dom: 16 new videos show as 15+", chip().textContent === "15+", JSON.stringify(chip().textContent));
+
+    // The live bus alone must move the chip. 2026-11-17 bug: the worker broadcast
+    // with runtime.sendMessage, which never reaches a content script, so the
+    // counters only moved on the next counters:init (i.e. after a page reload).
+    yga.state.applyInitSnapshot({ [CH1]: { newCount: 0, fetchedAt: 1, error: false } }, null, -1);
+    await flush(20);
+    check("dom: stale snapshot clears the chip", chip().textContent === "", JSON.stringify(chip().textContent));
+    await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
+    await deliver();
+    check(
+      "dom: live bus repaints the chip without a reload",
+      chip().textContent === "15+",
+      JSON.stringify(chip().textContent)
+    );
 
     // PLAN.md §10.5: right-click = "mark as watched" until the stage-4 panel.
     const ev = { type: "contextmenu", ctrlKey: false, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };

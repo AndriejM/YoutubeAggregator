@@ -23,7 +23,7 @@ window.yga = window.yga || {};
   let aggregate = null; // worker aggregate of the active profile
   let aggregateSeq = -1; // freshness of the applied aggregate (SW counter; -1 = none)
   let activeId = null; // active profile at last render (footer target)
-  let countsPending = false; // a refresh call may fire before counters load
+  let countsPending = 0; // a refresh call may fire before counters load
   let compWriter = null; // profiles.js registers the only composition writer
 
   function registerCompWriter(fn) {
@@ -318,14 +318,15 @@ window.yga = window.yga || {};
     // Kick the worker refresh for the active profile (PLAN.md §10.1).
     // minIntervalMs freshness is the worker's decision, not ours.
     async refreshCounters(opts) {
-      if (countsPending) return null;
-      countsPending = true;
+      const force = !!(opts && opts.force);
+      if (countsPending && !force) return null;
+      countsPending++;
       try {
         const id = yga.profiles ? await yga.profiles.activeProfileId() : "p_1";
         const res = await chrome.runtime.sendMessage({
           type: "counters:refresh",
           profileId: id,
-          force: !!(opts && opts.force)
+          force: force
         });
         if (res && res.ok === false) console.debug("[yga] counters refresh:", res.error);
         if (res && res.ok && res.aggregate) {
@@ -336,7 +337,7 @@ window.yga = window.yga || {};
         console.debug("[yga] counters refresh failed:", e);
         return null;
       } finally {
-        countsPending = false;
+        countsPending--;
       }
     },
 

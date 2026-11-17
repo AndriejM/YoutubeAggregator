@@ -18,6 +18,7 @@ const REQUEST_GAP_MS = 300; // 200–400 ms pause between fetches (PLAN.md §10.
 // Bus window: slightly above REQUEST_GAP_MS so consecutive writes coalesce
 // into one message while the pump still paints every few hundred ms.
 const EMIT_FLUSH_MS = 350;
+const EMIT_SEND_TIMEOUT_MS = 2000;
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 1; // 429/5xx/network: one retry after backoff
 const STALE_MS = 24 * 60 * 60 * 1000; // "stale" marker threshold (PLAN.md §10)
@@ -366,6 +367,21 @@ async function emitToTabs(message) {
   scheduleEmitFlush();
 }
 
+// The widget lives in the page, so the bus must go out through tabs.sendMessage.
+// runtime.sendMessage from the service worker only reaches extension contexts
+// (popup, options page) and is never delivered to content scripts — the counters
+// stayed frozen during the pump while every payload was correct.
+async function targetTabs() {
+  try {
+    return await Promise.race([
+      chrome.tabs.query({ url: "https://*.youtube.com/*" }),
+      new Promise((resolve) => setTimeout(() => resolve([]), EMIT_SEND_TIMEOUT_MS))
+    ]);
+  } catch (e) {
+    return [];
+  }
+}
+
 async function flushEmitQueue() {
   if (emitTimer) {
     clearTimeout(emitTimer);
@@ -382,12 +398,14 @@ async function flushEmitQueue() {
     const out = [];
     if (Object.keys(merged).length) out.push({ type: "counters:counts", counts: merged });
     out.push(...other);
+    const tabs = await targetTabs();
     for (const m of out) {
-      try {
-        await chrome.runtime.sendMessage(m);
-      } catch (e) {
-        // no receiving tab / self-echo — the counters:init snapshot covers tabs
-      }
+      // A tab without the content script yet (still loading, prerendered)
+      // rejects; the counters:init snapshot covers it when it boots.
+      await Promise.all(tabs.map((tab) => Promise.race([
+        chrome.tabs.sendMessage(tab.id, m).then(() => 1, () => 0),
+        new Promise((resolve) => setTimeout(() => resolve(0), EMIT_SEND_TIMEOUT_MS))
+      ])));
     }
   }
 }
@@ -547,11 +565,21 @@ let jobSeq = 0;
 function enqueue(channelIds, opts) {
   const jobs = [];
   const pending = new Set();
-  for (const job of queue) pending.add(job.channelId);
+  const queued = new Map();
+  for (const job of queue) {
+    pending.add(job.channelId);
+    queued.set(job.channelId, job);
+  }
   for (const channelId of inFlight) pending.add(channelId);
   let expected = 0;
   for (const channelId of channelIds) {
-    if (!channelId || pending.has(channelId)) continue;
+    if (!channelId) continue;
+    const existing = queued.get(channelId);
+    if (existing) {
+      if (opts.force) existing.force = true;
+      continue;
+    }
+    if (pending.has(channelId)) continue;
     pending.add(channelId);
     expected++;
     const job = {

@@ -10,7 +10,6 @@ window.yga = window.yga || {};
   let unsubComp = null;
   const RERENDER_MS = 200; // coalesce bus windows into one repaint
   let rerenderTimer = 0;
-
   // Membership signature of a rendered list: ids plus their group. A count-only
   // patch (§10.7) cannot remove a row, so a channel that left the profile —
   // excluded by the user in the panel — needs a real re-render.
