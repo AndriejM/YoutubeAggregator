@@ -12,6 +12,14 @@ const VIDEO_PREFIX = "yga:videos:";
 const VIDEOS_INDEX = "yga:videos-index";
 const ACCOUNT_KEY = "yga:account";
 const SETTINGS_KEY = "yga:settings";
+const LAST_PASS_KEY = "yga:last-refresh-pass";
+// Global pass cooldown (user report 2026-11-20): every YouTube tab fires
+// counters:refresh on load; with only the 90 s per-channel floor, several
+// open windows re-fetch the whole catalog at once — CPU pegged, browser
+// frozen. One storage stamp shared by all tabs caps the whole pass.
+const DEFAULT_COOLDOWN_MS = 60 * 60 * 1000;
+const MIN_COOLDOWN_MS = 30 * 60 * 1000;
+const MAX_COOLDOWN_MS = 600 * 60 * 1000;
 const ALARM_NAME = "yga:scheduled-refresh";
 const MIN_ALARM_MINUTES = 60; // PLAN.md §10: scheduled period floor
 const REQUEST_GAP_MS = 300; // 200–400 ms pause between fetches (PLAN.md §10.2)
@@ -60,11 +68,18 @@ async function getSettings() {
 
 function refreshCfg(settings) {
   const r = (settings && settings.refresh) || {};
+  const cooldown = Number(r.cooldownMs);
   return {
     minIntervalMs:
       Number.isFinite(r.minIntervalMs) && r.minIntervalMs >= 0
         ? r.minIntervalMs
         : DEFAULT_MIN_INTERVAL_MS,
+    // 0 disables the cooldown (tests, power users); anything else is clamped
+    // into the 30–600 minute range the settings panel offers.
+    cooldownMs: cooldown === 0
+      ? 0
+      : Math.min(MAX_COOLDOWN_MS, Math.max(MIN_COOLDOWN_MS,
+          Number.isFinite(cooldown) && cooldown > 0 ? cooldown : DEFAULT_COOLDOWN_MS)),
     batch:
       Number.isInteger(r.batch) && r.batch >= 1 && r.batch <= 50
         ? r.batch
@@ -599,6 +614,30 @@ function enqueue(channelIds, opts) {
 
 async function refreshChannels(profileId, channelIds, opts) {
   const started = now();
+  // Cooldown gate: one pass per cooldownMs across every tab and every SW
+  // restart — reloads and the ↻ button (force) included. The stamp is taken
+  // before enqueueing so simultaneous tabs coalesce into a single pass.
+  const settings = await getSettings();
+  const cooldownMs = refreshCfg(settings).cooldownMs;
+  if (cooldownMs > 0) {
+    const stamped = await chrome.storage.local.get(LAST_PASS_KEY);
+    const lastPass = Number(stamped[LAST_PASS_KEY]) || 0;
+    const wait = lastPass + cooldownMs - started;
+    if (wait > 0) {
+      await flushEmitQueue();
+      // force: the tabs asked for a refresh, so hand them the current
+      // aggregate even when nothing changed since the last emit.
+      const agg = profileId ? await emitProfileCounts(profileId, true) : null;
+      await flushEmitQueue();
+      return {
+        requested: 0, queued: 0, errors: 0, cooldown: true, waitMs: wait,
+        lastRun: lastRun, aggregate: agg, aggregateSeq: aggregateSeq
+      };
+    }
+    const payload = {};
+    payload[LAST_PASS_KEY] = started;
+    await chrome.storage.local.set(payload);
+  }
   const enq = enqueue(channelIds, opts);
   const deadline = now() + Math.max(60000, enq.expected * (REQUEST_GAP_MS + 15000));
   while (enq.jobs.length < enq.expected && now() < deadline) {
@@ -617,7 +656,10 @@ async function refreshChannels(profileId, channelIds, opts) {
   // deliver the window still pending before the aggregate so the tabs never
   // wait for the whole refresh to finish.
   await flushEmitQueue();
-  const agg = profileId ? await emitProfileCounts(profileId) : null;
+  // force: a refresh that changed nothing still owes the tabs an aggregate
+  // snapshot — emitProfileCounts dedupes by value, but the caller's response
+  // must never carry undefined after a completed pass.
+  const agg = profileId ? await emitProfileCounts(profileId, true) : null;
   await flushEmitQueue();
   lastRun = {
     at: started,

@@ -427,6 +427,26 @@
     "message": "Канал не опрашивается чаще этого интервала.",
     "description": "Подсказка минимального интервала обновления канала"
   },
+  "refreshCooldown": {
+    "message": "Пауза между опросами, минут",
+    "description": "Метка глобальной паузы между полным опросом RSS"
+  },
+  "refreshCooldownHint": {
+    "message": "Полный опрос RSS запускается не чаще этого интервала — во всех вкладках и окнах сразу, включая перезагрузку страницы и кнопку обновления.",
+    "description": "Подсказка глобальной паузы между полным опросом RSS"
+  },
+  "cooldownWait": {
+    "message": "Обновление RSS приостановлено",
+    "description": "Подсказка счётчика, когда обновление подавлено глобальной паузой"
+  },
+  "cooldownWaitLeft": {
+    "message": "осталось",
+    "description": "Prefix of the remaining cooldown minutes in the tooltip"
+  },
+  "cooldownMinutes": {
+    "message": "мин",
+    "description": "Minutes unit for the cooldown tooltip"
+  },
   "widgetPosition": {
     "message": "Позиция виджета",
     "description": "Метка переключателя позиции виджета"

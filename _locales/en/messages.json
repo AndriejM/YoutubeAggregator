@@ -427,6 +427,26 @@
     "message": "A channel is never re-fetched more often than this.",
     "description": "Hint of the per-channel minimum refresh interval"
   },
+  "refreshCooldown": {
+    "message": "Refresh pause, minutes",
+    "description": "Label of the global RSS pass cooldown"
+  },
+  "refreshCooldownHint": {
+    "message": "The full RSS pass runs at most this often — across all tabs and windows at once, including page reloads and the refresh button.",
+    "description": "Hint of the global RSS pass cooldown"
+  },
+  "cooldownWait": {
+    "message": "RSS refresh paused",
+    "description": "Counter tooltip when a refresh was suppressed by the global cooldown"
+  },
+  "cooldownWaitLeft": {
+    "message": "left",
+    "description": "Prefix of the remaining cooldown minutes in the tooltip"
+  },
+  "cooldownMinutes": {
+    "message": "min",
+    "description": "Minutes unit for the cooldown tooltip"
+  },
   "widgetPosition": {
     "message": "Widget position",
     "description": "Label of the widget mount position select"

@@ -96,7 +96,8 @@ const chains = []; // async sections; the report waits for all of them
     },
     "yga:account": { accountKey: "UCme" },
     "yga:subs:UCme": [{ c: CH1, t: "One" }, { c: CH2, t: "Two" }],
-    "yga:profile-channels:p_2": { [CH1]: { addedAt: 1 } }
+    "yga:profile-channels:p_2": { [CH1]: { addedAt: 1 } },
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 90000, cooldownMs: 0 } }
   }).then(async () => {
     let res = await env.send({ type: "counters:refresh", profileId: "nope" });
     check("worker: unknown profile rejected", res && res.ok === false && res.error === "unknownProfile", JSON.stringify(res));
@@ -251,12 +252,12 @@ const chains = []; // async sections; the report waits for all of them
       "yga:settings": {
         version: 1,
         activeProfileId: "p_1",
-        refresh: { mode: "scheduled", scheduled: { enabled: true, periodInMinutes: 240, maxChannelsPerRun: 60 }, batch: 12, minIntervalMs: 0 }
+        refresh: { mode: "scheduled", scheduled: { enabled: true, periodInMinutes: 240, maxChannelsPerRun: 60 }, batch: 12, minIntervalMs: 0, cooldownMs: 0 }
       }
     });
     await env.send({ type: "counters:settings" });
     check("worker: alarm created at >=60min", env.alarms.has("yga:scheduled-refresh") && env.alarms.get("yga:scheduled-refresh").periodInMinutes === 240);
-    await env.sandbox.chrome.storage.local.set({ "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { scheduled: { enabled: true, periodInMinutes: 10 }, batch: 12 } } });
+    await env.sandbox.chrome.storage.local.set({ "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { scheduled: { enabled: true, periodInMinutes: 10 }, batch: 12, cooldownMs: 0 } } });
     await env.send({ type: "counters:settings" });
     check("worker: alarm floor 60min", env.alarms.get("yga:scheduled-refresh").periodInMinutes === 60);
 
@@ -268,7 +269,7 @@ const chains = []; // async sections; the report waits for all of them
 
     // alarm disabled → cleared
     await env.sandbox.chrome.storage.local.set({
-      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { scheduled: { enabled: false }, batch: 12 } }
+      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { scheduled: { enabled: false }, batch: 12, cooldownMs: 0 } }
     });
     await env.send({ type: "counters:settings" });
     check("worker: disabled schedule clears alarm", !env.alarms.has("yga:scheduled-refresh"));
@@ -278,7 +279,7 @@ const chains = []; // async sections; the report waits for all of them
     await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH2] });
     await flush();
     counts = await env.send({ type: "counters:get", channelIds: [CH2] });
-    check("worker: garbage XML → error + cache kept", counts.channelCounts[CH2].error > 0 && counts.channelCounts[CH2].newCount === 4);
+    check("worker: garbage XML → error + cache kept", counts.channelCounts[CH2].error > 0 && counts.channelCounts[CH2].newCount === 4, JSON.stringify(counts.channelCounts[CH2]));
 
     // --- content-side view math (content/counters.js newSince) ------------
     const cenv = makeSandbox();
@@ -306,7 +307,7 @@ const chains = []; // async sections; the report waits for all of them
     "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
     "yga:account": { accountKey: "UCme" },
     "yga:subs:UCme": [{ c: CH1, t: "One" }, { c: CH2, t: "Two" }],
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
   }).then(async () => {
     env.setResponder(() => new Promise((r) => setTimeout(() => r({ status: 200, body: fixture, etag: "etag-prog" }), 120)));
     const refresh = env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1, CH2] });
@@ -352,7 +353,7 @@ const chains = []; // async sections; the report waits for all of them
     "yga:groups": [{ id: "g_1", name: "G", profileId: "p_1", order: 0, collapsed: false }],
     "yga:profile-channels:p_1": { [CH1]: { addedAt: 1, lastVisitAt: 0, groupId: "g_1" } },
     "yga:profile-channels:p_2": { [CH1]: { addedAt: 1, lastVisitAt: 0, groupId: "g_2" } },
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
   }).then(async () => {
     env.setResponder(() => ({ status: 404, body: "gone", etag: null }));
     for (let i = 1; i <= 3; i++) {
@@ -426,7 +427,7 @@ const chains = []; // async sections; the report waits for all of them
     "yga:subs:UCme": T.map((c, i) => ({ c: c, t: "T" + i })),
     "yga:groups": [{ id: "g_1", name: "G", profileId: "p_1", order: 0, collapsed: false }],
     "yga:profile-channels:p_1": comp,
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
   }).then(async () => {
     env.setResponder(() => ({ status: 429, body: "slow down", etag: null }));
     for (let i = 1; i <= 8; i++) {
@@ -492,7 +493,7 @@ const chains = []; // async sections; the report waits for all of them
     "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
     "yga:account": { accountKey: "UCme" },
     "yga:subs:UCme": [{ c: CH1, t: "One" }],
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
   }).then(async () => {
     let res = await env.send({ type: "counters:refresh", profileId: "p_1" });
     check("filters: refresh queued", res && res.ok && res.requested === 1, JSON.stringify(res));
@@ -579,7 +580,7 @@ const chains = []; // async sections; the report waits for all of them
     "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
     "yga:account": { accountKey: "UCme" },
     "yga:subs:UCme": [{ c: CH1, t: "One" }],
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 }, filters: {} }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 }, filters: {} }
   }).then(async () => {
     env.setResponder(() => ({ status: 200, body: kindFeed, etag: "etag-kind" }));
     await env.send({ type: "counters:refresh", profileId: "p_1", force: true, channelIds: [CH1] });
@@ -741,7 +742,7 @@ const chains = []; // async sections; the report waits for all of them
       "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
       "yga:account": { accountKey: "UCme" },
       "yga:subs:UCme": [{ c: CH1, t: "One" }],
-      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
     })
     .then(async () => {
       await env.send({ type: "counters:refresh", profileId: "p_1" });
@@ -884,7 +885,7 @@ const chains = []; // async sections; the report waits for all of them
       "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
       "yga:account": { accountKey: "UCme" },
       "yga:subs:UCme": [{ c: cid(1), t: "One" }, { c: cid(2), t: "Two" }, { c: cid(3), t: "Three" }],
-      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+      "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
     })
     .then(async () => {
       await c.profiles.load();
@@ -1520,5 +1521,56 @@ chains.push((async () => {
     JSON.stringify(messages)
   );
 })().catch((e) => failures.push("forced refresh guard section crashed: " + e)));
+
+// --- global pass cooldown (user report 2026-11-20) ------------------------
+// Several YouTube tabs each fire counters:refresh on load; without a global
+// gate every window re-fetched the whole catalog at once (CPU pegged, browser
+// frozen). One storage stamp must cap the pass for every tab, force included,
+// and survive an SW restart.
+chains.push((async () => {
+  const env = makeSandbox();
+  loadInto(env);
+  await env.sandbox.chrome.storage.local.set({
+    "yga:profiles": { p_1: { id: "p_1", builtin: true, includeAllSubs: true } },
+    "yga:account": { accountKey: "UCme" },
+    "yga:subs:UCme": [{ c: CH1, t: "One" }, { c: CH2, t: "Two" }],
+    "yga:settings": {
+      version: 1, activeProfileId: "p_1",
+      refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 3600000 }
+    }
+  });
+
+  let res = await env.send({ type: "counters:refresh", profileId: "p_1" });
+  await flush();
+  const fetches1 = env.fetchCalls.length;
+  check("cooldown: first pass fetches", res && res.ok && res.requested === 2 && fetches1 === 2,
+    JSON.stringify(res) + " fetches=" + fetches1);
+
+  // A second tab (or the ↻ button, force=true) inside the cooldown: no fetch.
+  res = await env.send({ type: "counters:refresh", profileId: "p_1", force: true });
+  check("cooldown: second pass suppressed, force included",
+    res && res.ok && res.cooldown === true && res.requested === 0 && res.waitMs > 0,
+    JSON.stringify(res));
+  check("cooldown: suppressed pass fetches nothing", env.fetchCalls.length === fetches1,
+    env.fetchCalls.length + " vs " + fetches1);
+  check("cooldown: suppressed pass still ships the aggregate",
+    res && !!res.aggregate && res.aggregate.profileId === "p_1", JSON.stringify(res));
+
+  // Cooldown lives in storage, not in the worker: a fresh worker honours it.
+  const env2 = makeSandbox();
+  loadInto(env2);
+  for (const [k, v] of env.storage) env2.storage.set(k, clone(v));
+  res = await env2.send({ type: "counters:refresh", profileId: "p_1", force: true });
+  check("cooldown: survives an SW restart",
+    res && res.ok && res.cooldown === true && env2.fetchCalls.length === 0, JSON.stringify(res));
+
+  // Expired cooldown: the stamp is refreshed and the pass runs again.
+  env.storage.set("yga:last-refresh-pass", Date.now() - 2 * 3600000);
+  res = await env.send({ type: "counters:refresh", profileId: "p_1" });
+  await flush();
+  check("cooldown: expired cooldown runs a new pass",
+    res && res.ok && !res.cooldown && res.requested === 2 && env.fetchCalls.length > fetches1,
+    JSON.stringify(res) + " fetches=" + env.fetchCalls.length);
+})().catch((e) => failures.push("cooldown section crashed: " + e)));
 
 Promise.all(chains).then(() => report());

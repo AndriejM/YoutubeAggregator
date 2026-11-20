@@ -706,6 +706,16 @@ window.yga = window.yga || {};
       await u.save("refresh.minIntervalMs", seconds * 1000);
     });
     host.appendChild(u.field("refreshMinInterval", minInterval, "refreshMinIntervalHint"));
+
+    const cooldown = u.number(Math.round((Number(refresh.cooldownMs) || 3600000) / 60000), {
+      min: "30", max: "600", step: "30"
+    });
+    cooldown.addEventListener("change", async () => {
+      const minutes = Math.min(600, Math.max(30, Number(cooldown.value) || 60));
+      cooldown.value = String(minutes);
+      await u.save("refresh.cooldownMs", minutes * 60000);
+    });
+    host.appendChild(u.field("refreshCooldown", cooldown, "refreshCooldownHint"));
   };
 
   // ---- Фильтры видео (Этап 10, PLAN.md §19): Shorts / трансляции / возраст ----

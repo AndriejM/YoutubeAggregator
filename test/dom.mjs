@@ -468,7 +468,7 @@ env.sandbox.chrome.storage.local
     "yga:profiles": { p_1: { id: "p_1", name: "All", builtin: true, includeAllSubs: true } },
     "yga:account": { accountKey: "UCme" },
     "yga:subs:UCme": [{ c: CH1, t: "One", a: "" }],
-    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0 } }
+    "yga:settings": { version: 1, activeProfileId: "p_1", refresh: { mode: "onOpen", scheduled: { enabled: false }, batch: 12, minIntervalMs: 0, cooldownMs: 0 } }
   })
   .then(async () => {
     await env.send({ type: "counters:refresh", profileId: "p_1" });

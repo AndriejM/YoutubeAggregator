@@ -116,11 +116,9 @@ export function makeSandbox() {
     alarms: {
       create: async (name, opts) => {
         alarms.set(name, opts || {});
-        if (opts && (opts.when || opts.delayInMinutes)) {
-          setTimeout(() => {
-            for (const fn of listeners.alarm) fn({ name: name });
-          }, opts.when ? Math.max(0, opts.when - Date.now()) : Math.max(1, Math.round((opts.delayInMinutes || 0) * 50)));
-        }
+        // No auto-fire: periodInMinutes is not a delay, and a real timer here
+        // would fire a scheduled run in the middle of an unrelated section.
+        // Tests trigger alarms via listeners.alarm.
       },
       get: async (name) => (alarms.has(name) ? { name: name, periodInMinutes: alarms.get(name).periodInMinutes } : undefined),
       clear: async (name) => {

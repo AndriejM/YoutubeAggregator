@@ -237,13 +237,21 @@ window.yga = window.yga || {};
       // The worker pushes per-channel counts as its queue drains, so rows and
       // the chip repaint during the refresh; the spinner only says the queue
       // is still running, it is not a paint deadline.
+      let res = null;
       try {
-        await yga.state.refreshCounters({ force: true });
+        res = await yga.state.refreshCounters({ force: true });
       } finally {
         if (!widget.isConnected) return;
         btn.classList.remove("yga-busy");
         btn.disabled = false;
         updateTotal(widget);
+        // Global cooldown (user report 2026-11-20): the worker skipped the
+        // pass — say so in the chip tooltip instead of pretending success.
+        if (res && res.cooldown && total) {
+          const mins = Math.max(1, Math.ceil((res.waitMs || 0) / 60000));
+          total.title = yga.i18n("cooldownWait") + " · " +
+            mins + " " + yga.i18n("cooldownMinutes") + " " + yga.i18n("cooldownWaitLeft");
+        }
       }
     },
 
