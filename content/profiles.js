@@ -392,11 +392,31 @@ window.yga = window.yga || {};
       return readComposition(id);
     },
 
+    // Read-only membership view for the render path. It must never repair the
+    // composition: syncProfile writes yga:profile-channels:<id>, storage.onChanged
+    // feeds that write straight back into the render path (state.js compListeners
+    // → counters.js rerender → getVisibleSubs → profileView), and two tabs whose
+    // per-page catalogs disagree then flip `unsubscribed` on each other's
+    // channels forever — 100% CPU and a frozen browser (user report 2026-11-21).
+    // Composition repair belongs to syncProfile, i.e. to catalog refreshes only.
+    async membershipOf(profileId, subsList) {
+      const profile = this.get(profileId);
+      if (!profile) return null;
+      const comp = await readComposition(profileId);
+      const fresh = new Set(subsList.map((s) => s.channelId));
+      if (profile.includeAllSubs) {
+        return Array.from(fresh).filter((id) => !comp[id] || isMember(comp[id]));
+      }
+      return Object.keys(comp).filter((id) => isMember(comp[id]) && fresh.has(id));
+    },
+
     // Merge fresh subs into the profile composition (PLAN.md §11 stage 2).
     // includeAllSubs profiles get an implicit entry per subscription (so
     // lastVisitAt has a home); curated profiles only gain entries through
     // addChannel. Unsubscribed channels leave the list but keep their history
     // in case the subscription returns. Returns the ids to show in the widget.
+    // Writes the composition — call it only from a catalog refresh, never from
+    // a repaint (see membershipOf).
     async syncProfile(profileId, subsList) {
       const profile = this.get(profileId);
       if (!profile) return null;

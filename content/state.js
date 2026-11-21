@@ -9,6 +9,12 @@ window.yga = window.yga || {};
   let CACHE_KEY = "yga:subs:default";
   const WRITE_DEBOUNCE_MS = 300; // storage write-amplification guard (PLAN.md §5)
   const STALE_MS = 24 * 60 * 60 * 1000; // "stale" counter style (PLAN.md §10)
+  // Circuit breaker for the composition bridge: one coalesced notification per
+  // burst instead of one per storage write. A repaint must never answer a
+  // composition write with another composition write (see profiles.js
+  // membershipOf); this caps the damage if such a cycle ever returns.
+  const COMP_NOTIFY_MS = 250;
+  let compNotifyTimer = 0;
 
   const listeners = new Set();
   const counterListeners = new Set();
@@ -30,6 +36,20 @@ window.yga = window.yga || {};
     compWriter = fn;
   }
 
+  function notifyComposition() {
+    if (compNotifyTimer) return;
+    compNotifyTimer = setTimeout(() => {
+      compNotifyTimer = 0;
+      for (const cb of compListeners) {
+        try {
+          cb();
+        } catch (e) {
+          console.debug("[yga] comp listener failed:", e);
+        }
+      }
+    }, COMP_NOTIFY_MS);
+  }
+
   // Cross-tab convergence of yga:profile-channels:<id> (stage 3). Only one
   // writer (profiles.js) writes this key; the bridge is best-effort — storage
   // is the truth and a remount reloads it.
@@ -43,13 +63,7 @@ window.yga = window.yga || {};
         touched = true;
       }
     }
-    if (touched) for (const cb of compListeners) {
-      try {
-        cb();
-      } catch (e) {
-        console.debug("[yga] comp listener failed:", e);
-      }
-    }
+    if (touched) notifyComposition();
   });
 
   // Worker → tabs bus (debounced runtime messages; see service-worker.js).
@@ -112,15 +126,30 @@ window.yga = window.yga || {};
 
   // Channels of the active profile (PLAN.md §5 composition rules).
   // null = catalog not loaded yet → the widget shows its loading placeholder.
+  // Read-only by design: membershipOf never writes, so a repaint cannot re-enter
+  // the storage.onChanged bridge that drives it (see profiles.js membershipOf).
   async function profileView() {
     if (!subs) return null;
     const all = Array.from(subs.values());
     if (!yga.profiles) return all;
     const id = await yga.profiles.activeProfileId();
-    const ids = await yga.profiles.syncProfile(id, all);
+    const ids = await yga.profiles.membershipOf(id, all);
     if (!ids) return all;
     const wanted = new Set(ids);
     return all.filter((s) => wanted.has(s.channelId));
+  }
+
+  // The one place allowed to repair the composition: a catalog refresh. Keeping
+  // syncProfile out of profileView is what stops the cross-tab write storm
+  // (user report 2026-11-21: browser frozen at 100% CPU after a channel click).
+  async function syncComposition() {
+    if (!yga.profiles) return;
+    try {
+      const id = await yga.profiles.activeProfileId();
+      await yga.profiles.syncProfile(id, Array.from((subs || new Map()).values()));
+    } catch (e) {
+      console.debug("[yga] composition sync failed:", e);
+    }
   }
 
   // Adds derived counter fields to channels of the ACTIVE profile in place
@@ -267,6 +296,7 @@ window.yga = window.yga || {};
       const changed = mergeIntoCache(list);
       if (changed) {
         scheduleWrite();
+        await syncComposition();
         await emit();
       }
       return subs;

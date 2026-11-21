@@ -2330,6 +2330,65 @@ globalThis.innerWidth = 1280;
       await flush(10);
     }
 
+    // --- regression: a composition write must never answer a repaint ---------
+    // state.js bridges every yga:profile-channels:<id> write back into the
+    // render path (storage.onChanged → compListeners → counters.js rerender →
+    // getVisibleSubs → profileView). While profileView called syncProfile, that
+    // was a closed cycle: our tab marked a channel `unsubscribed` because its
+    // own page catalog missed it, the other tab (whose catalog had it) cleared
+    // the flag, and the two flipped it forever — 100% CPU, frozen browser, only
+    // an extension reload helped (user report 2026-11-21).
+    {
+      const local = globalThis.chrome.storage.local;
+      const realSet = local.set;
+      let compWrites = 0;
+      local.set = async function (payload) {
+        for (const k in payload) if (k.indexOf("yga:profile-channels:") === 0) compWrites++;
+        return realSet(payload);
+      };
+      try {
+        // Our world stops seeing CH2; the shared composition still carries it as
+        // a live member, exactly as another tab with a fuller catalog leaves it.
+        const catalog = (await yga.state.getAllSubs()).filter((s) => s.channelId !== CH2);
+        await yga.state.updateSubs(catalog);
+        await flush(40);
+        const key = "yga:profile-channels:p_1";
+        const foreign = {
+          [CH1]: { addedAt: 1, lastVisitAt: 0, groupId: null },
+          [CH2]: { addedAt: 1, lastVisitAt: 0, groupId: null }
+        };
+        const before = shared.has(key) ? JSON.parse(JSON.stringify(shared.get(key))) : undefined;
+        shared.set(key, JSON.parse(JSON.stringify(foreign)));
+        changes.push({ key: key, oldValue: before, newValue: JSON.parse(JSON.stringify(foreign)) });
+
+        compWrites = 0;
+        await deliver();
+        await flush(200); // COMP_NOTIFY_MS in state.js + the counters.js repaint
+        check("composition: an incoming composition change never makes us write it back",
+          compWrites === 0, "writes=" + compWrites);
+
+        // The foreign channel is not ours to mark unsubscribed: membershipOf
+        // filters it out of the view and leaves the record alone.
+        const visible = await yga.state.getVisibleSubs();
+        const stillLive = (shared.get(key)[CH2] || {}).unsubscribed !== true;
+        check("composition: repaint stays read-only",
+          compWrites === 0 && stillLive && visible.every((s) => s.channelId !== CH2),
+          "writes=" + compWrites + " live=" + stillLive +
+          " visible=" + visible.map((s) => s.channelId).join(","));
+
+        // Repair is not gone, only relocated: a catalog refresh still writes.
+        const CHX = "UCregression0000000000X";
+        compWrites = 0;
+        await yga.state.updateSubs(catalog.concat([{ channelId: CHX, title: "X", avatarUrl: "" }]));
+        await flush(40);
+        check("composition: a catalog refresh still repairs it",
+          compWrites > 0 && !!shared.get(key)[CHX],
+          "writes=" + compWrites + " entry=" + JSON.stringify(shared.get(key)[CHX]));
+      } finally {
+        local.set = realSet;
+      }
+    }
+
     report();
   })
   .catch((e) => {
